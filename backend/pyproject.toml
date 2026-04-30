@@ -1,0 +1,20 @@
+[project]
+name = "gemini-media-tool"
+version = "0.1.0"
+description = "Tool tao hinh anh va video su dung Gemini API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "google-genai>=1.0.0",
+    "python-multipart>=0.0.18",
+    "aiofiles>=24.1.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "aiosqlite>=0.20.0",
+    "Pillow>=11.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
