@@ -8,21 +8,21 @@ export default function Home() {
           Gemini Media Tool
         </h1>
         <p className="mt-6 text-lg leading-8 text-zinc-400">
-          Tao hinh anh va video chat luong cao voi Gemini AI. Su dung Imagen
-          4.0, Nano Banana va Veo 3.1.
+          Tạo hình ảnh và video chất lượng cao với Gemini AI. Sử dụng Imagen
+          4.0, Nano Banana và Veo 3.1.
         </p>
         <div className="mt-10 flex items-center justify-center gap-x-6">
           <Link
             href="/image"
             className="rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 transition-colors"
           >
-            Tao Hinh Anh
+            Tạo Hình Ảnh
           </Link>
           <Link
             href="/video"
             className="rounded-xl bg-zinc-800 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-zinc-700 transition-colors ring-1 ring-zinc-700"
           >
-            Tao Video
+            Tạo Video
           </Link>
         </div>
       </div>
@@ -46,8 +46,8 @@ export default function Home() {
           </div>
           <h3 className="text-lg font-semibold text-white">Imagen 4.0</h3>
           <p className="mt-2 text-sm text-zinc-400">
-            Sinh hinh anh chat luong cao tu van ban. Ho tro nhieu phong cach va
-            ti le khung hinh.
+            Sinh hình ảnh chất lượng cao từ văn bản. Hỗ trợ nhiều phong cách và
+            tỉ lệ khung hình.
           </p>
         </div>
 
@@ -69,8 +69,8 @@ export default function Home() {
           </div>
           <h3 className="text-lg font-semibold text-white">Nano Banana</h3>
           <p className="mt-2 text-sm text-zinc-400">
-            Sinh va chinh sua hinh anh native voi Gemini. Ho tro text rendering
-            chinh xac.
+            Sinh và chỉnh sửa hình ảnh native với Gemini. Hỗ trợ text rendering
+            chính xác.
           </p>
         </div>
 
@@ -92,8 +92,8 @@ export default function Home() {
           </div>
           <h3 className="text-lg font-semibold text-white">Veo 3.1</h3>
           <p className="mt-2 text-sm text-zinc-400">
-            Tao video chat luong cao len toi 4K voi am thanh native. Ho tro
-            portrait va landscape.
+            Tạo video chất lượng cao lên tới 4K với âm thanh native. Hỗ trợ
+            portrait và landscape.
           </p>
         </div>
       </div>

@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Gemini Media Tool",
-    description="Tool tao hinh anh va video su dung Gemini API",
+    description="Tool tạo hình ảnh và video sử dụng Gemini API",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -63,7 +63,7 @@ async def health():
 @app.post("/api/v1/images/generate", response_model=GenerationResponse)
 async def generate_images(req: ImageGenerateRequest, background_tasks: BackgroundTasks):
     if not settings.gemini_api_key:
-        raise HTTPException(status_code=400, detail="GEMINI_API_KEY chua duoc cau hinh")
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY chưa được cấu hình")
 
     generation_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -82,7 +82,7 @@ async def generate_images(req: ImageGenerateRequest, background_tasks: Backgroun
 
     background_tasks.add_task(_process_image_generation, generation_id, req)
 
-    return GenerationResponse(id=generation_id, status="processing", message="Dang tao hinh anh...")
+    return GenerationResponse(id=generation_id, status="processing", message="Đang tạo hình ảnh...")
 
 
 async def _process_image_generation(generation_id: str, req: ImageGenerateRequest):
@@ -141,7 +141,7 @@ def _calculate_image_cost(model: str, num_images: int) -> float:
 @app.post("/api/v1/videos/generate", response_model=GenerationResponse)
 async def generate_video(req: VideoGenerateRequest, background_tasks: BackgroundTasks):
     if not settings.gemini_api_key:
-        raise HTTPException(status_code=400, detail="GEMINI_API_KEY chua duoc cau hinh")
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY chưa được cấu hình")
 
     video_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -160,7 +160,7 @@ async def generate_video(req: VideoGenerateRequest, background_tasks: Background
 
     background_tasks.add_task(_process_video_generation, video_id, req)
 
-    return GenerationResponse(id=video_id, status="processing", message="Dang tao video... (co the mat 1-3 phut)")
+    return GenerationResponse(id=video_id, status="processing", message="Đang tạo video... (có thể mất 1-3 phút)")
 
 
 async def _process_video_generation(video_id: str, req: VideoGenerateRequest):
@@ -209,7 +209,7 @@ async def get_image_generation(generation_id: str):
     gen = await row.fetchone()
     if not gen:
         await db.close()
-        raise HTTPException(status_code=404, detail="Khong tim thay")
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
 
     images_cursor = await db.execute(
         "SELECT * FROM generated_images WHERE generation_id = ?", (generation_id,)
@@ -247,7 +247,7 @@ async def get_video_generation(video_id: str):
     await db.close()
 
     if not gen:
-        raise HTTPException(status_code=404, detail="Khong tim thay")
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
 
     video_url = None
     if gen["filename"]:
@@ -373,11 +373,11 @@ async def download_image(image_id: str):
     await db.close()
 
     if not row:
-        raise HTTPException(status_code=404, detail="Khong tim thay")
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
 
     filepath = os.path.join(settings.media_dir, "images", row["filename"])
     if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="File khong ton tai")
+        raise HTTPException(status_code=404, detail="File không tồn tại")
 
     return FileResponse(filepath, filename=row["filename"], media_type="image/png")
 
@@ -392,11 +392,11 @@ async def download_video(video_id: str):
     await db.close()
 
     if not row or not row["filename"]:
-        raise HTTPException(status_code=404, detail="Khong tim thay hoac video chua san sang")
+        raise HTTPException(status_code=404, detail="Không tìm thấy hoặc video chưa sẵn sàng")
 
     filepath = os.path.join(settings.media_dir, "videos", row["filename"])
     if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="File khong ton tai")
+        raise HTTPException(status_code=404, detail="File không tồn tại")
 
     return FileResponse(filepath, filename=row["filename"], media_type="video/mp4")
 
@@ -408,41 +408,41 @@ async def list_models():
     return {
         "image_models": [
             {
+                "id": "gemini-2.5-flash-preview-image-generation",
+                "name": "Gemini 2.5 Flash",
+                "description": "Sinh ảnh native, hỗ trợ chỉnh sửa - Miễn phí",
+                "cost_per_image": 0,
+            },
+            {
                 "id": "imagen-4.0-generate-001",
                 "name": "Imagen 4.0 Generate",
-                "description": "Chat luong cao, da dang phong cach",
+                "description": "Chất lượng cao, đa dạng phong cách",
                 "cost_per_image": 0.04,
             },
             {
                 "id": "imagen-4.0-fast-001",
                 "name": "Imagen 4.0 Fast",
-                "description": "Toc do nhanh, gia re",
+                "description": "Tốc độ nhanh, giá rẻ",
                 "cost_per_image": 0.02,
             },
             {
                 "id": "imagen-4.0-ultra-001",
                 "name": "Imagen 4.0 Ultra",
-                "description": "Chat luong cao nhat",
+                "description": "Chất lượng cao nhất",
                 "cost_per_image": 0.06,
-            },
-            {
-                "id": "gemini-2.5-flash-preview-image-generation",
-                "name": "Nano Banana (Gemini 2.5 Flash)",
-                "description": "Sinh anh native, ho tro chinh sua",
-                "cost_per_image": 0.01,
             },
         ],
         "video_models": [
             {
                 "id": "veo-3.1-generate-preview",
                 "name": "Veo 3.1 Generate",
-                "description": "Chat luong cao, 720p-4K, am thanh native",
+                "description": "Chất lượng cao, 720p-4K, âm thanh native",
                 "cost_per_second": 0.40,
             },
             {
                 "id": "veo-3.1-fast-preview",
                 "name": "Veo 3.1 Fast",
-                "description": "Nhanh hon, gia re hon",
+                "description": "Nhanh hơn, giá rẻ hơn",
                 "cost_per_second": 0.15,
             },
         ],

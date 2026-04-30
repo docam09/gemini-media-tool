@@ -24,15 +24,15 @@ export default function HistoryPage() {
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Lich Su Prompt</h1>
+          <h1 className="text-3xl font-bold text-white">Lịch Sử Prompt</h1>
           <p className="mt-2 text-zinc-400">
-            Xem lai va tai su dung cac prompt da dung
+            Xem lại và tái sử dụng các prompt đã dùng
           </p>
         </div>
         <div className="flex gap-2">
           {[
-            { value: "", label: "Tat ca" },
-            { value: "image", label: "Hinh anh" },
+            { value: "", label: "Tất cả" },
+            { value: "image", label: "Hình ảnh" },
             { value: "video", label: "Video" },
           ].map((f) => (
             <button
@@ -77,7 +77,7 @@ export default function HistoryPage() {
         </div>
       ) : items.length === 0 ? (
         <div className="mt-16 text-center">
-          <p className="text-zinc-500">Chua co lich su prompt nao</p>
+          <p className="text-zinc-500">Chưa có lịch sử prompt nào</p>
         </div>
       ) : (
         <div className="mt-8 space-y-3">
@@ -93,7 +93,7 @@ export default function HistoryPage() {
                     : "bg-emerald-600/20 text-emerald-400"
                 }`}
               >
-                {item.type === "image" ? "Hinh anh" : "Video"}
+                {item.type === "image" ? "Hình ảnh" : "Video"}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-zinc-200">{item.prompt}</p>

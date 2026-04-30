@@ -7,7 +7,7 @@ const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "3:4", "4:3"];
 
 export default function ImagePage() {
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("imagen-4.0-generate-001");
+  const [model, setModel] = useState("gemini-2.5-flash-preview-image-generation");
   const [numImages, setNumImages] = useState(1);
   const [aspectRatio, setAspectRatio] = useState("1:1");
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function ImagePage() {
           return;
         }
         if (data.status === "failed") {
-          setError("Tao hinh anh that bai. Vui long thu lai.");
+          setError("Tạo hình ảnh thất bại. Vui lòng thử lại.");
           setLoading(false);
           return;
         }
@@ -38,7 +38,7 @@ export default function ImagePage() {
         // continue polling
       }
     }
-    setError("Het thoi gian cho. Vui long thu lai.");
+    setError("Hết thời gian chờ. Vui lòng thử lại.");
     setLoading(false);
   }, []);
 
@@ -59,16 +59,16 @@ export default function ImagePage() {
       });
       await pollResult(res.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Co loi xay ra");
+      setError(err instanceof Error ? err.message : "Có lỗi xảy ra");
       setLoading(false);
     }
   };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-3xl font-bold text-white">Tao Hinh Anh</h1>
+      <h1 className="text-3xl font-bold text-white">Tạo Hình Ảnh</h1>
       <p className="mt-2 text-zinc-400">
-        Nhap mo ta de tao hinh anh voi AI
+        Nhập mô tả để tạo hình ảnh với AI
       </p>
 
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -76,14 +76,14 @@ export default function ImagePage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-zinc-300">
-              Mo ta hinh anh
+              Mô tả hình ảnh
             </label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
               className="mt-2 block w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-white placeholder-zinc-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-              placeholder="VD: Mot con meo deo kinh mat ngoi doc sach trong quan cafe..."
+              placeholder="VD: Một con mèo đeo kính mát ngồi đọc sách trong quán cafe..."
             />
           </div>
 
@@ -99,22 +99,22 @@ export default function ImagePage() {
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name} - {m.description}
-                  {m.cost_per_image ? ` ($${m.cost_per_image}/anh)` : ""}
+                  {m.cost_per_image ? ` ($${m.cost_per_image}/ảnh)` : ""}
                 </option>
               ))}
               {models.length === 0 && (
                 <>
+                  <option value="gemini-2.5-flash-preview-image-generation">
+                    Gemini 2.5 Flash - Miễn phí
+                  </option>
                   <option value="imagen-4.0-generate-001">
-                    Imagen 4.0 Generate ($0.04/anh)
+                    Imagen 4.0 Generate ($0.04/ảnh)
                   </option>
                   <option value="imagen-4.0-fast-001">
-                    Imagen 4.0 Fast ($0.02/anh)
+                    Imagen 4.0 Fast ($0.02/ảnh)
                   </option>
                   <option value="imagen-4.0-ultra-001">
-                    Imagen 4.0 Ultra ($0.06/anh)
-                  </option>
-                  <option value="gemini-2.5-flash-preview-image-generation">
-                    Nano Banana (Gemini 2.5 Flash)
+                    Imagen 4.0 Ultra ($0.06/ảnh)
                   </option>
                 </>
               )}
@@ -124,7 +124,7 @@ export default function ImagePage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-zinc-300">
-                So luong
+                Số lượng
               </label>
               <select
                 value={numImages}
@@ -133,7 +133,7 @@ export default function ImagePage() {
               >
                 {[1, 2, 3, 4].map((n) => (
                   <option key={n} value={n}>
-                    {n} anh
+                    {n} ảnh
                   </option>
                 ))}
               </select>
@@ -141,7 +141,7 @@ export default function ImagePage() {
 
             <div>
               <label className="block text-sm font-medium text-zinc-300">
-                Ti le
+                Tỉ lệ
               </label>
               <select
                 value={aspectRatio}
@@ -183,10 +183,10 @@ export default function ImagePage() {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                   />
                 </svg>
-                Dang tao...
+                Đang tạo...
               </span>
             ) : (
-              "Tao Hinh Anh"
+              "Tạo Hình Ảnh"
             )}
           </button>
 
@@ -220,16 +220,16 @@ export default function ImagePage() {
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                 />
               </svg>
-              <p className="mt-4 text-zinc-400">Dang tao hinh anh...</p>
+              <p className="mt-4 text-zinc-400">Đang tạo hình ảnh...</p>
             </div>
           )}
 
           {result && (
             <div>
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">Ket qua</h2>
+                <h2 className="text-lg font-semibold text-white">Kết quả</h2>
                 <span className="text-sm text-zinc-500">
-                  Chi phi: ${result.cost.toFixed(2)}
+                  Chi phí: ${result.cost.toFixed(2)}
                 </span>
               </div>
               <div
@@ -252,7 +252,7 @@ export default function ImagePage() {
                         href={api.getDownloadUrl("image", img.id)}
                         className="m-4 rounded-lg bg-white/20 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm hover:bg-white/30 transition-colors"
                       >
-                        Tai xuong
+                        Tải xuống
                       </a>
                     </div>
                   </div>
@@ -277,7 +277,7 @@ export default function ImagePage() {
                 />
               </svg>
               <p className="mt-4 text-zinc-500">
-                Nhap mo ta va nhan &quot;Tao Hinh Anh&quot; de bat dau
+                Nhập mô tả và nhấn &quot;Tạo Hình Ảnh&quot; để bắt đầu
               </p>
             </div>
           )}

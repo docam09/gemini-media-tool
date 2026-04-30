@@ -20,7 +20,7 @@ export default function VideoPage() {
   const pollResult = useCallback(async (id: string) => {
     for (let i = 0; i < 120; i++) {
       await new Promise((r) => setTimeout(r, 5000));
-      setProgress(`Dang xu ly... (${(i + 1) * 5}s)`);
+      setProgress(`Đang xử lý... (${(i + 1) * 5}s)`);
       try {
         const data = await api.getVideoGeneration(id);
         if (data.status === "completed") {
@@ -30,7 +30,7 @@ export default function VideoPage() {
           return;
         }
         if (data.status === "failed") {
-          setError("Tao video that bai. Vui long thu lai.");
+          setError("Tạo video thất bại. Vui lòng thử lại.");
           setLoading(false);
           setProgress("");
           return;
@@ -39,7 +39,7 @@ export default function VideoPage() {
         // continue polling
       }
     }
-    setError("Het thoi gian cho (10 phut). Vui long thu lai.");
+    setError("Hết thời gian chờ (10 phút). Vui lòng thử lại.");
     setLoading(false);
     setProgress("");
   }, []);
@@ -51,7 +51,7 @@ export default function VideoPage() {
     setLoading(true);
     setError("");
     setResult(null);
-    setProgress("Dang gui yeu cau...");
+    setProgress("Đang gửi yêu cầu...");
 
     try {
       const res = await api.generateVideo({
@@ -59,10 +59,10 @@ export default function VideoPage() {
         model,
         aspect_ratio: aspectRatio,
       });
-      setProgress("Video dang duoc tao... (co the mat 1-3 phut)");
+      setProgress("Video đang được tạo... (có thể mất 1-3 phút)");
       await pollResult(res.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Co loi xay ra");
+      setError(err instanceof Error ? err.message : "Có lỗi xảy ra");
       setLoading(false);
       setProgress("");
     }
@@ -70,9 +70,9 @@ export default function VideoPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-3xl font-bold text-white">Tao Video</h1>
+      <h1 className="text-3xl font-bold text-white">Tạo Video</h1>
       <p className="mt-2 text-zinc-400">
-        Nhap mo ta de tao video voi Veo 3.1
+        Nhập mô tả để tạo video với Veo 3.1
       </p>
 
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -80,18 +80,18 @@ export default function VideoPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-zinc-300">
-              Mo ta video
+              Mô tả video
             </label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={6}
               className="mt-2 block w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-white placeholder-zinc-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-              placeholder="VD: Canh quay drone bay qua thanh pho Tokyo vao ban dem, anh den neon phan chieu tren mat duong uot..."
+              placeholder="VD: Cảnh quay drone bay qua thành phố Tokyo vào ban đêm, ánh đèn neon phản chiếu trên mặt đường ướt..."
             />
             <p className="mt-2 text-xs text-zinc-500">
-              Tip: Mo ta cang chi tiet, video cang dep. Bao gom phong cach
-              camera, anh sang, am thanh.
+              Tip: Mô tả càng chi tiết, video càng đẹp. Bao gồm phong cách
+              camera, ánh sáng, âm thanh.
             </p>
           </div>
 
@@ -108,17 +108,17 @@ export default function VideoPage() {
                 <option key={m.id} value={m.id}>
                   {m.name} - {m.description}
                   {m.cost_per_second
-                    ? ` ($${m.cost_per_second}/giay)`
+                    ? ` ($${m.cost_per_second}/giây)`
                     : ""}
                 </option>
               ))}
               {models.length === 0 && (
                 <>
                   <option value="veo-3.1-generate-preview">
-                    Veo 3.1 Generate ($0.40/giay)
+                    Veo 3.1 Generate ($0.40/giây)
                   </option>
                   <option value="veo-3.1-fast-preview">
-                    Veo 3.1 Fast ($0.15/giay)
+                    Veo 3.1 Fast ($0.15/giây)
                   </option>
                 </>
               )}
@@ -127,12 +127,12 @@ export default function VideoPage() {
 
           <div>
             <label className="block text-sm font-medium text-zinc-300">
-              Ti le khung hinh
+              Tỉ lệ khung hình
             </label>
             <div className="mt-2 flex gap-3">
               {[
                 { value: "16:9", label: "Ngang (16:9)" },
-                { value: "9:16", label: "Doc (9:16)" },
+                { value: "9:16", label: "Dọc (9:16)" },
               ].map((ar) => (
                 <button
                   key={ar.value}
@@ -176,10 +176,10 @@ export default function VideoPage() {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                   />
                 </svg>
-                {progress || "Dang tao..."}
+                {progress || "Đang tạo..."}
               </span>
             ) : (
-              "Tao Video"
+              "Tạo Video"
             )}
           </button>
 
@@ -191,8 +191,8 @@ export default function VideoPage() {
 
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
             <p className="text-xs text-zinc-500">
-              <strong className="text-zinc-400">Luu y:</strong> Video tao ra dai
-              ~8 giay. Thoi gian xu ly: 1-3 phut. Chi phi uoc tinh:{" "}
+              <strong className="text-zinc-400">Lưu ý:</strong> Video tạo ra dài
+              ~8 giây. Thời gian xử lý: 1-3 phút. Chi phí ước tính:{" "}
               {model === "veo-3.1-fast-preview" ? "$1.20" : "$3.20"}/video.
             </p>
           </div>
@@ -223,7 +223,7 @@ export default function VideoPage() {
               </svg>
               <p className="mt-4 text-zinc-400">{progress}</p>
               <p className="mt-2 text-xs text-zinc-600">
-                Video mat 1-3 phut de tao. Xin vui long doi...
+                Video mất 1-3 phút để tạo. Xin vui lòng đợi...
               </p>
             </div>
           )}
@@ -231,7 +231,7 @@ export default function VideoPage() {
           {result && result.video_url && (
             <div>
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">Ket qua</h2>
+                <h2 className="text-lg font-semibold text-white">Kết quả</h2>
                 <span className="text-sm text-zinc-500">
                   {result.duration_seconds}s | {result.resolution} | $
                   {result.cost.toFixed(2)}
@@ -263,7 +263,7 @@ export default function VideoPage() {
                       d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
                     />
                   </svg>
-                  Tai video
+                  Tải video
                 </a>
               </div>
             </div>
@@ -285,7 +285,7 @@ export default function VideoPage() {
                 />
               </svg>
               <p className="mt-4 text-zinc-500">
-                Nhap mo ta va nhan &quot;Tao Video&quot; de bat dau
+                Nhập mô tả và nhấn &quot;Tạo Video&quot; để bắt đầu
               </p>
             </div>
           )}

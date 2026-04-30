@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Gemini Media Tool",
-  description: "Tao hinh anh va video voi Gemini AI",
+  description: "Tạo hình ảnh và video với Gemini AI",
 };
 
 export default function RootLayout({
@@ -55,25 +55,25 @@ export default function RootLayout({
                   href="/image"
                   className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
                 >
-                  Tao Hinh Anh
+                  Tạo Hình Ảnh
                 </Link>
                 <Link
                   href="/video"
                   className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
                 >
-                  Tao Video
+                  Tạo Video
                 </Link>
                 <Link
                   href="/gallery"
                   className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
                 >
-                  Thu Vien
+                  Thư Viện
                 </Link>
                 <Link
                   href="/history"
                   className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
                 >
-                  Lich Su
+                  Lịch Sử
                 </Link>
               </nav>
             </div>
