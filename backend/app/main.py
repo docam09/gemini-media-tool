@@ -330,7 +330,9 @@ async def api_generate_storyboard(
     anchor, spec, char_name = await _resolve_character_anchor(
         db, character_id=payload.character_id, character=payload.character
     )
-    system_prompt = prompts.STORYBOARD_SYSTEM_PROMPT.format(duration=payload.duration_seconds)
+    system_prompt = prompts.STORYBOARD_SYSTEM_PROMPT.replace(
+        "{duration}", str(payload.duration_seconds)
+    )
     data = await gemini_client.generate_json(
         api_key=x_gemini_api_key,
         system_prompt=system_prompt,
@@ -387,9 +389,9 @@ async def api_generate_variants(
     )
     count = max(1, min(payload.count, 6))
     system_prompt = (
-        prompts.STORYBOARD_SYSTEM_PROMPT.format(duration=payload.duration_seconds)
+        prompts.STORYBOARD_SYSTEM_PROMPT.replace("{duration}", str(payload.duration_seconds))
         + "\n\n"
-        + prompts.VARIANTS_SYSTEM_PROMPT.format(count=count)
+        + prompts.VARIANTS_SYSTEM_PROMPT.replace("{count}", str(count))
     )
     request = schemas.GenerateStoryboardRequest(
         project_id=payload.project_id,
