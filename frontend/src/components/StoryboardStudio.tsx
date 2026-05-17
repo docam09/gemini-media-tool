@@ -42,7 +42,11 @@ function StoryboardCard({
     if (!affiliateUrl) return storyboard.cta
     if (!storyboard.cta) return affiliateUrl
     if (storyboard.cta.includes('http')) return storyboard.cta
-    return storyboard.cta.replace(/\[?link affiliate\]?/i, affiliateUrl) || `${storyboard.cta} ${affiliateUrl}`
+    const placeholder = /\[?link affiliate\]?/i
+    if (placeholder.test(storyboard.cta)) {
+      return storyboard.cta.replace(placeholder, affiliateUrl)
+    }
+    return `${storyboard.cta.trimEnd()} ${affiliateUrl}`
   }, [storyboard.cta, affiliateUrl])
 
   return (
