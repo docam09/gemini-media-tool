@@ -137,29 +137,41 @@ export default function App() {
     if (!recognitionSupported || !languages) return
     if (listening) {
       recognizerRef.current?.stop()
-      recognizerRef.current = null
-      setListening(false)
+      // Don't null out the ref / state yet — wait for onend so any interim
+      // text can still get translated as the final transcript.
       return
     }
     setError(null)
     setInterim('')
     setInput('')
     cancelSpeech()
+    let gotAnything = false
     const handle = listenOnce(languages[source].bcp47, {
-      onInterim: (t) => setInterim(t),
+      onInterim: (t) => {
+        if (t) gotAnything = true
+        setInterim(t)
+      },
       onFinal: (t) => {
+        gotAnything = true
         setInput(t)
         setInterim('')
         void runTranslate(t)
       },
       onError: (msg) => {
-        setError(`Speech recognition: ${msg}`)
+        setError(msg)
         setListening(false)
+        setInterim('')
         recognizerRef.current = null
       },
       onEnd: () => {
         setListening(false)
+        setInterim('')
         recognizerRef.current = null
+        if (!gotAnything) {
+          setError(
+            'Không bắt được giọng nói. Kiểm tra micro đang bật và Chrome đã được cấp quyền micro cho localhost.',
+          )
+        }
       },
     })
     if (handle) {
@@ -267,7 +279,7 @@ export default function App() {
                   : 'Trình duyệt không hỗ trợ nhận dạng giọng nói (dùng Chrome)'
               }
             >
-              {listening ? '⏺ Đang nghe...' : '🎤 Nói'}
+              {listening ? '⏹ Dừng' : '🎤 Nói'}
             </button>
             <button
               type="button"
@@ -290,7 +302,7 @@ export default function App() {
         <div className="pane__footer">
           <span className="hint">
             {listening
-              ? 'Đang nghe... nói xong sẽ tự động dịch.'
+              ? '⏺ Đang nghe... nói xong nhấn Dừng để dịch.'
               : 'Enter hoặc nhấn Dịch để gửi'}
           </span>
           <button type="submit" className="primary" disabled={busy || !input.trim()}>

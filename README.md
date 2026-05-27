@@ -33,6 +33,8 @@ trả thêm phí cho dịch vụ TTS/STT.
 
 ## Cài đặt
 
+### macOS / Linux (Poetry)
+
 ```bash
 # Backend
 cd backend
@@ -44,6 +46,23 @@ cd ../frontend
 npm install
 ```
 
+### Windows PowerShell (không cần Poetry — pip + venv)
+
+```powershell
+# Backend
+cd backend
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+"GEMINI_API_KEY=<key của bạn>" | Out-File -Encoding utf8 .env
+
+# Frontend (PowerShell mới)
+cd frontend
+npm install
+```
+
+Nếu PowerShell báo chặn script, chạy 1 lần: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`.
+
 ## Chạy
 
 Trong 2 terminal riêng:
@@ -51,7 +70,7 @@ Trong 2 terminal riêng:
 ```bash
 # Terminal 1 — backend trên :8000
 cd backend
-poetry run fastapi dev app/main.py
+poetry run fastapi dev app/main.py    # hoặc trên Windows: fastapi dev app/main.py (sau khi đã activate .venv)
 
 # Terminal 2 — frontend trên :5173
 cd frontend
@@ -60,6 +79,20 @@ npm run dev
 
 Mở <http://localhost:5173>. Frontend Vite tự proxy `/api/*` về backend nên
 không phải lo CORS hay cấu hình thêm.
+
+## Khắc phục sự cố
+
+Nếu Dịch trả lỗi, gọi endpoint chẩn đoán:
+
+```bash
+curl http://localhost:8000/diag
+```
+
+Kết quả sẽ chỉ rõ giai đoạn nào hỏng:
+- `{"ok": false, "stage": "init"}` → chưa nạp được `GEMINI_API_KEY`. Kiểm tra `backend/.env` hoặc biến môi trường.
+- `{"ok": false, "stage": "gemini", "detail": "...404..."}` → tên model sai. Đổi `GEMINI_MODEL` trong `.env`, vd. `gemini-2.5-flash`.
+- `{"ok": false, "stage": "gemini", "detail": "...PERMISSION_DENIED..."}` → key chưa được kích hoạt Gemini API hoặc bị giới hạn vùng.
+- `{"ok": true, ...}` → backend OK, vấn đề có thể ở frontend.
 
 ## Sử dụng
 

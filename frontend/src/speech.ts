@@ -79,7 +79,10 @@ export function createRecognizer(lang: string): SpeechRecognitionLike | null {
   if (!Ctor) return null
   const rec = new Ctor()
   rec.lang = lang
-  rec.continuous = false
+  // Continuous mode lets the user fully control when listening stops.
+  // Chrome's auto end-of-speech detection can be flaky for short tonal
+  // utterances (e.g. Vietnamese), and an explicit stop button is clearer UX.
+  rec.continuous = true
   rec.interimResults = true
   rec.maxAlternatives = 1
   return rec
@@ -90,6 +93,23 @@ export interface RecognitionCallbacks {
   onFinal: (transcript: string) => void
   onError?: (message: string) => void
   onEnd?: () => void
+  onStart?: () => void
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  'no-speech': 'Không nghe thấy gì. Kiểm tra micro và nói to hơn.',
+  'audio-capture': 'Không truy cập được micro. Kiểm tra micro đang cắm/bật.',
+  'not-allowed': 'Trình duyệt đã chặn quyền micro. Cho phép localhost trong cài đặt site.',
+  'service-not-allowed':
+    'Dịch vụ nhận dạng giọng nói bị chặn. Thử kiểm tra kết nối mạng.',
+  network: 'Lỗi mạng khi gọi dịch vụ nhận dạng giọng nói của Google.',
+  aborted: 'Bị hủy.',
+  'language-not-supported':
+    'Ngôn ngữ này không được hỗ trợ bởi trình duyệt.',
+}
+
+function friendlyError(code: string): string {
+  return ERROR_MESSAGES[code] ?? `Speech recognition: ${code}`
 }
 
 export function listenOnce(lang: string, callbacks: RecognitionCallbacks): {
@@ -99,6 +119,12 @@ export function listenOnce(lang: string, callbacks: RecognitionCallbacks): {
   if (!rec) return null
 
   let finalText = ''
+  let lastInterim = ''
+  let stopped = false
+
+  rec.onstart = () => {
+    callbacks.onStart?.()
+  }
 
   rec.onresult = (event) => {
     let interim = ''
@@ -111,18 +137,27 @@ export function listenOnce(lang: string, callbacks: RecognitionCallbacks): {
         interim += transcript
       }
     }
-    if (interim && callbacks.onInterim) {
+    lastInterim = interim
+    if (callbacks.onInterim) {
       callbacks.onInterim(interim)
     }
   }
 
   rec.onerror = (event) => {
-    callbacks.onError?.(event.error || 'Unknown speech recognition error')
+    // 'no-speech' and 'aborted' are not fatal — they fire when the user stops
+    // without saying anything, or when we abort programmatically. Don't surface
+    // these as errors unless we also got no text at all.
+    if (event.error === 'aborted') return
+    callbacks.onError?.(friendlyError(event.error))
   }
 
   rec.onend = () => {
-    if (finalText.trim()) {
-      callbacks.onFinal(finalText.trim())
+    // If continuous mode didn't return a final result but interim text is
+    // populated, use the interim text as the final transcript so the user's
+    // utterance doesn't get lost (this can happen on some Chrome builds).
+    const combined = (finalText || lastInterim).trim()
+    if (combined) {
+      callbacks.onFinal(combined)
     }
     callbacks.onEnd?.()
   }
@@ -136,6 +171,8 @@ export function listenOnce(lang: string, callbacks: RecognitionCallbacks): {
 
   return {
     stop: () => {
+      if (stopped) return
+      stopped = true
       try {
         rec.stop()
       } catch {

@@ -42,14 +42,32 @@ export async function translate(params: {
 
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
+    // Clone the response so we can fall back to text() if the body isn't JSON.
+    const cloned = res.clone()
     try {
       const body = (await res.json()) as { detail?: string }
-      if (body.detail) detail = body.detail
+      if (body.detail) detail = `${detail} \u2014 ${body.detail}`
     } catch {
-      // ignore JSON parse errors and fall back to status code
+      try {
+        const text = await cloned.text()
+        if (text.trim()) detail = `${detail} \u2014 ${text.trim()}`
+      } catch {
+        // give up
+      }
     }
     throw new Error(detail)
   }
 
   return (await res.json()) as TranslateResponse
+}
+
+export async function fetchDiag(): Promise<{
+  ok: boolean
+  stage?: string
+  detail?: string
+  model?: string
+  sample?: string
+}> {
+  const res = await fetch(`${API_BASE}/diag`)
+  return res.json()
 }
