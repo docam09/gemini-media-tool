@@ -13,6 +13,17 @@ export interface TranslateResponse {
   target: LanguageCode
   romanization: string | null
   note: string | null
+  model: string
+}
+
+export interface ModelInfo {
+  label: string
+  description: string
+}
+
+export interface ModelsResponse {
+  default: string
+  models: Record<string, ModelInfo>
 }
 
 export interface HistoryEntry {

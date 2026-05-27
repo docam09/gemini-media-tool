@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchHealth, fetchLanguages, translate } from './api'
+import { fetchHealth, fetchLanguages, fetchModels, translate } from './api'
 import {
   cancelSpeech,
   isRecognitionSupported,
@@ -7,7 +7,13 @@ import {
   listenOnce,
   speak,
 } from './speech'
-import type { HistoryEntry, LanguageCode, LanguageInfo, Style } from './types'
+import type {
+  HistoryEntry,
+  LanguageCode,
+  LanguageInfo,
+  ModelInfo,
+  Style,
+} from './types'
 
 type Direction = 'vi-to-ko' | 'ko-to-vi'
 
@@ -25,6 +31,31 @@ const STYLES: { value: Style; label: string }[] = [
 const PLACEHOLDERS: Record<LanguageCode, string> = {
   vi: 'Gõ tiếng Việt ở đây... (vd. "Bạn đã ăn cơm chưa?")',
   ko: '여기에 한국어를 입력하세요... (예: "오늘 날씨 어때요?")',
+}
+
+const LS_KEYS = {
+  context: 'vnkr.context',
+  glossary: 'vnkr.glossary',
+  model: 'vnkr.model',
+  advancedOpen: 'vnkr.advancedOpen',
+} as const
+
+function loadString(key: string): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveString(key: string, value: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // localStorage may be unavailable (e.g. Safari private mode)
+  }
 }
 
 function newId(): string {
@@ -49,6 +80,13 @@ export default function App() {
     geminiConfigured: boolean
     model: string
   } | null>(null)
+  const [models, setModels] = useState<Record<string, ModelInfo>>({})
+  const [selectedModel, setSelectedModel] = useState<string>(() => loadString(LS_KEYS.model))
+  const [context, setContext] = useState<string>(() => loadString(LS_KEYS.context))
+  const [glossary, setGlossary] = useState<string>(() => loadString(LS_KEYS.glossary))
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(
+    () => loadString(LS_KEYS.advancedOpen) === '1',
+  )
 
   const recognizerRef = useRef<{ stop: () => void } | null>(null)
   const recognitionSupported = useMemo(isRecognitionSupported, [])
@@ -79,10 +117,34 @@ export default function App() {
       .catch(() => {
         // health check failure is surfaced separately via translate errors
       })
+    fetchModels()
+      .then((res) => {
+        if (cancelled) return
+        setModels(res.models)
+        // If nothing saved yet or saved value no longer valid, fall back to
+        // the backend's default so the seg control highlights a real option.
+        setSelectedModel((current) => (current && res.models[current] ? current : res.default))
+      })
+      .catch(() => {
+        // /models is optional; selectedModel stays as-is
+      })
     return () => {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    saveString(LS_KEYS.context, context)
+  }, [context])
+  useEffect(() => {
+    saveString(LS_KEYS.glossary, glossary)
+  }, [glossary])
+  useEffect(() => {
+    if (selectedModel) saveString(LS_KEYS.model, selectedModel)
+  }, [selectedModel])
+  useEffect(() => {
+    saveString(LS_KEYS.advancedOpen, advancedOpen ? '1' : '0')
+  }, [advancedOpen])
 
   const runTranslate = useCallback(
     async (text: string) => {
@@ -94,7 +156,15 @@ export default function App() {
       setRomanization(null)
       setNote(null)
       try {
-        const res = await translate({ text: trimmed, source, target, style })
+        const res = await translate({
+          text: trimmed,
+          source,
+          target,
+          style,
+          context: context || undefined,
+          glossary: glossary || undefined,
+          model: selectedModel || undefined,
+        })
         setOutput(res.translation)
         setRomanization(res.romanization)
         setNote(res.note)
@@ -122,7 +192,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [autoSpeak, languages, source, style, target],
+    [autoSpeak, context, glossary, languages, selectedModel, source, style, target],
   )
 
   const handleSubmit = useCallback(
@@ -262,6 +332,72 @@ export default function App() {
             <span>Tự đọc kết quả</span>
           </label>
         </div>
+
+        {Object.keys(models).length > 0 && (
+          <div className="controls__row">
+            <label className="field">
+              <span>Model</span>
+              <div className="seg">
+                {Object.entries(models).map(([id, info]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`seg__btn ${selectedModel === id ? 'seg__btn--active' : ''}`}
+                    onClick={() => setSelectedModel(id)}
+                    title={info.description}
+                  >
+                    {info.label}
+                  </button>
+                ))}
+              </div>
+            </label>
+            <button
+              type="button"
+              className="ghost ghost--sm"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              aria-expanded={advancedOpen}
+            >
+              {advancedOpen ? '− Nâng cao' : '+ Nâng cao'}
+            </button>
+          </div>
+        )}
+
+        {advancedOpen && (
+          <div className="advanced">
+            <label className="field field--block">
+              <span>Bối cảnh / lĩnh vực</span>
+              <textarea
+                className="advanced__input"
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+                placeholder='Vd. "Phòng kế toán tài chính tại công ty Hàn Quốc, trao đổi về báo cáo tài chính và kiểm toán nội bộ."'
+                rows={2}
+                maxLength={2000}
+                spellCheck={false}
+              />
+              <small className="hint">
+                Gemini sẽ ưu tiên dùng thuật ngữ phù hợp với bối cảnh này.
+              </small>
+            </label>
+            <label className="field field--block">
+              <span>Từ điển công ty (mỗi dòng 1 cặp)</span>
+              <textarea
+                className="advanced__input advanced__input--mono"
+                value={glossary}
+                onChange={(e) => setGlossary(e.target.value)}
+                placeholder={
+                  'công nợ = 매입채무\nkhấu hao = 감가상각\nhóa đơn GTGT = 부가가치세 세금계산서'
+                }
+                rows={4}
+                maxLength={4000}
+                spellCheck={false}
+              />
+              <small className="hint">
+                Gemini sẽ cố gắng dùng đúng những cặp từ bạn quy định ở đây. Lưu tự động trong trình duyệt.
+              </small>
+            </label>
+          </div>
+        )}
       </section>
 
       <form className="pane" onSubmit={handleSubmit}>

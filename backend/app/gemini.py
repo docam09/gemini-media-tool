@@ -85,11 +85,16 @@ class GeminiTranslator:
         source: str,
         target: str,
         style: str = "casual",
+        context: str | None = None,
+        glossary: str | None = None,
     ) -> TranslationResult:
-        prompt = (
-            f"Translate from {source} to {target}. "
-            f"Tone: {style} daily conversation.\n"
-            f"Source ({source}):\n{text.strip()}"
+        prompt = _build_prompt(
+            text=text,
+            source=source,
+            target=target,
+            style=style,
+            context=context,
+            glossary=glossary,
         )
 
         try:
@@ -118,6 +123,35 @@ class GeminiTranslator:
         romanization = (data.get("romanization") or "").strip() or None
         note = (data.get("note") or "").strip() or None
         return TranslationResult(translation=translation, romanization=romanization, note=note)
+
+
+def _build_prompt(
+    *,
+    text: str,
+    source: str,
+    target: str,
+    style: str,
+    context: str | None,
+    glossary: str | None,
+) -> str:
+    parts: list[str] = [
+        f"Translate from {source} to {target}.",
+        f"Tone: {style} daily conversation.",
+    ]
+    if context and context.strip():
+        parts.append(
+            "Domain / situational context (apply terminology appropriate to this "
+            f"setting):\n{context.strip()}"
+        )
+    if glossary and glossary.strip():
+        parts.append(
+            "Glossary \u2014 prefer these exact mappings when applicable, even if "
+            "another wording would be natural. Each line maps a source-language "
+            "term to its required target-language equivalent:\n"
+            f"{glossary.strip()}"
+        )
+    parts.append(f"Source ({source}):\n{text.strip()}")
+    return "\n\n".join(parts)
 
 
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)

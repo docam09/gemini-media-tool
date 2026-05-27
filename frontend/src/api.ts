@@ -1,4 +1,10 @@
-import type { LanguageCode, LanguageInfo, Style, TranslateResponse } from './types'
+import type {
+  LanguageCode,
+  LanguageInfo,
+  ModelsResponse,
+  Style,
+  TranslateResponse,
+} from './types'
 
 const API_BASE = '/api'
 
@@ -23,11 +29,22 @@ export async function fetchHealth(): Promise<{
   return res.json()
 }
 
+export async function fetchModels(): Promise<ModelsResponse> {
+  const res = await fetch(`${API_BASE}/models`)
+  if (!res.ok) {
+    throw new Error(`Failed to load models: ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function translate(params: {
   text: string
   source: LanguageCode
   target: LanguageCode
   style?: Style
+  context?: string
+  glossary?: string
+  model?: string
 }): Promise<TranslateResponse> {
   const res = await fetch(`${API_BASE}/translate`, {
     method: 'POST',
@@ -37,6 +54,9 @@ export async function translate(params: {
       source: params.source,
       target: params.target,
       style: params.style ?? 'casual',
+      context: params.context?.trim() || null,
+      glossary: params.glossary?.trim() || null,
+      model: params.model || null,
     }),
   })
 
