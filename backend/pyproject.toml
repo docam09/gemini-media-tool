@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "facebook-comment-suggestion-backend"
+version = "0.1.0"
+description = "FastAPI backend for human-reviewed Facebook comment suggestions"
+authors = ["docam09"]
+readme = "../README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = { extras = ["standard"], version = "^0.115.0" }
+google-genai = "^1.17.0"
+pydantic = "^2.7.0"
+pydantic-settings = "^2.3.0"
+httpx = "^0.28.1"
+python-multipart = "^0.0.29"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+httpx = "^0.28.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
