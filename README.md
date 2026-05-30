@@ -13,6 +13,8 @@ final comment.
 ## Features
 
 - Paste Facebook post text or a post URL as context.
+- Read public URL metadata when Facebook exposes it.
+- Upload a screenshot, image, or video so Gemini can extract visible text/context.
 - Generate 3-5 comment suggestions with Gemini.
 - Configure language, tone, relationship context, and extra guidance.
 - Copy a suggested comment or open the post in Facebook to comment manually.
@@ -40,6 +42,8 @@ Backend runs on `http://localhost:8000`.
 Useful endpoints:
 
 - `GET /healthz`
+- `GET /api/url-context?url=...`
+- `POST /api/media-context`
 - `POST /api/comment-suggestions`
 
 ## Frontend
@@ -64,7 +68,8 @@ Frontend runs on `http://localhost:5173` and proxies API calls to the backend.
 
 For personal Facebook profiles, Meta Graph API does not provide broad access to
 friends' feed posts for third-party apps. This app supports a compliant workflow:
-the user provides the post context, Gemini drafts suggestions, and the user
-manually decides whether to post. If you later want Page automation, it should be
-implemented only for Pages/assets you administer and with Meta-approved
+the app can read public URL metadata when available, or the user can provide a
+screenshot/image/video for Gemini analysis. Gemini drafts suggestions, and the
+user manually decides whether to post. If you later want Page automation, it
+should be implemented only for Pages/assets you administer and with Meta-approved
 permissions.

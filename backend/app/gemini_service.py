@@ -63,3 +63,24 @@ class GeminiCommentService:
         payload = json.loads(response.text or "{}")
         suggestions = payload.get("suggestions", [])
         return [CommentSuggestion.model_validate(item) for item in suggestions]
+
+    def analyze_media(self, content: bytes, mime_type: str) -> str:
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=[
+                types.Part.from_bytes(data=content, mime_type=mime_type),
+                (
+                    "Extract readable text and summarize the visible context in this "
+                    "Facebook post media. If it is a video, describe visible frames "
+                    "and any readable text. Return concise Vietnamese text."
+                ),
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "You help a user understand media they provided before drafting "
+                    "a respectful Facebook comment."
+                ),
+                temperature=0.2,
+            ),
+        )
+        return (response.text or "").strip()

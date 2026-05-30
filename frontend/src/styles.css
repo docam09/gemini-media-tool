@@ -143,11 +143,21 @@ button.secondary {
   background: #ecf2ff;
 }
 
-.error {
+.error,
+.context-note {
   border-radius: 16px;
   padding: 14px 18px;
+}
+
+.error {
   color: #9b1c1c;
   background: #fee2e2;
+}
+
+.context-note {
+  margin: 0;
+  color: #295295;
+  background: #eaf1ff;
 }
 
 .results {

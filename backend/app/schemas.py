@@ -25,3 +25,14 @@ class CommentSuggestion(BaseModel):
 class CommentSuggestionResponse(BaseModel):
     suggestions: list[CommentSuggestion]
     safety_note: str
+
+
+class UrlContextResponse(BaseModel):
+    extracted_text: str
+    source: str
+    note: str
+
+
+class MediaAnalysisResponse(BaseModel):
+    extracted_text: str
+    note: str

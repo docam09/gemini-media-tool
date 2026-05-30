@@ -10,6 +10,11 @@ type ApiResponse = {
   safety_note: string;
 };
 
+type ContextResponse = {
+  extracted_text: string;
+  note: string;
+};
+
 type FormState = {
   postUrl: string;
   postText: string;
@@ -37,6 +42,9 @@ function App() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isReadingUrl, setIsReadingUrl] = useState(false);
+  const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
+  const [contextNote, setContextNote] = useState("");
 
   const canSubmit = useMemo(
     () => Boolean(form.postUrl.trim() || form.postText.trim()),
@@ -92,6 +100,85 @@ function App() {
     setCopiedIndex(index);
   }
 
+  function appendContext(extractedText: string, note: string) {
+    setForm((current) => ({
+      ...current,
+      postText: [current.postText.trim(), extractedText.trim()]
+        .filter(Boolean)
+        .join("\n\n")
+    }));
+    setContextNote(note);
+  }
+
+  async function readPostUrl() {
+    if (!form.postUrl.trim()) {
+      setError("Nhập Facebook post URL trước.");
+      return;
+    }
+
+    setError("");
+    setContextNote("");
+    setIsReadingUrl(true);
+
+    try {
+      const response = await fetch(
+        `/api/url-context?url=${encodeURIComponent(form.postUrl.trim())}`
+      );
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? "Không đọc được nội dung URL.");
+      }
+
+      const data = (await response.json()) as ContextResponse;
+      appendContext(data.extracted_text, data.note);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Không đọc được nội dung URL."
+      );
+    } finally {
+      setIsReadingUrl(false);
+    }
+  }
+
+  async function analyzeMedia(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setError("");
+    setContextNote("");
+    setIsAnalyzingMedia(true);
+
+    const payload = new FormData();
+    payload.append("file", file);
+
+    try {
+      const response = await fetch("/api/media-context", {
+        method: "POST",
+        body: payload
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? "Không phân tích được media.");
+      }
+
+      const data = (await response.json()) as ContextResponse;
+      appendContext(data.extracted_text, data.note);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Không phân tích được media."
+      );
+    } finally {
+      setIsAnalyzingMedia(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="hero">
@@ -99,9 +186,9 @@ function App() {
           <p className="eyebrow">Human-reviewed Facebook replies</p>
           <h1>Gợi ý bình luận Facebook để bạn duyệt thủ công</h1>
           <p className="hero-copy">
-            Dán nội dung bài viết hoặc link bài viết, chọn giọng văn, rồi để
-            Gemini tạo vài bình luận tự nhiên. Tool không đọc feed bạn bè và
-            không tự đăng bình luận.
+            Dán link công khai, nội dung bài viết, hoặc upload ảnh/video có chữ
+            để Gemini nắm ngữ cảnh và tạo vài bình luận tự nhiên. Tool không
+            bypass Facebook login và không tự đăng bình luận.
           </p>
         </div>
         <div className="policy-card">
@@ -125,11 +212,32 @@ function App() {
             }
           />
         </label>
+        <button
+          className="secondary"
+          disabled={!form.postUrl.trim() || isReadingUrl}
+          type="button"
+          onClick={() => void readPostUrl()}
+        >
+          {isReadingUrl ? "Đang đọc URL..." : "Đọc nội dung công khai từ URL"}
+        </button>
 
         <label>
-          Nội dung bài viết
+          Ảnh/video/screenshot bài viết
+          <input
+            accept="image/*,video/*"
+            type="file"
+            onChange={(event) => void analyzeMedia(event.target.files?.[0])}
+          />
+        </label>
+        {isAnalyzingMedia && (
+          <p className="context-note">Gemini đang đọc chữ/ngữ cảnh trong media...</p>
+        )}
+        {contextNote && <p className="context-note">{contextNote}</p>}
+
+        <label>
+          Nội dung bài viết / nội dung đã nhận diện
           <textarea
-            placeholder="Dán nội dung bài viết ở đây để Gemini hiểu ngữ cảnh..."
+            placeholder="Dán nội dung, đọc URL công khai, hoặc upload media để Gemini tự điền ngữ cảnh..."
             rows={8}
             value={form.postText}
             onChange={(event) =>
