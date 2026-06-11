@@ -33,24 +33,51 @@ Script: [`excel_indexer.py`](./excel_indexer.py) (chỉ phụ thuộc `openpyxl`
 - Cần truy vết (trace) một công thức về tận các ô input gốc.
 - Cần tìm tất cả công thức chứa một hàm/tham chiếu (audit).
 
-## Yêu cầu môi trường
+## Yêu cầu môi trường & engine đọc
 
 ```bash
 pip install openpyxl
 ```
 
-- `.xlsx` / `.xlsm`: openpyxl đọc trực tiếp (cả công thức lẫn giá trị đã cache).
-- `.xlsb` / `.xls` (định dạng nhị phân): openpyxl **KHÔNG** đọc được, và `pyxlsb`
-  chỉ lấy được *giá trị* chứ không lấy được *chuỗi công thức*. Vì vậy script tự
-  động convert sang `.xlsx` bằng **LibreOffice headless** trước khi parse:
+`build` hỗ trợ nhiều "engine" để lấy công thức (chọn bằng `--engine`):
 
-  ```bash
-  sudo apt-get install -y libreoffice-calc   # cung cấp lệnh `soffice`
-  ```
+| Engine | Đọc được | Cần gì | Ghi file convert ra đĩa? |
+|--------|----------|--------|--------------------------|
+| `openpyxl` | `.xlsx`, `.xlsm` | chỉ `openpyxl` | Không |
+| `com` | mọi định dạng kể cả `.xlsb` | **Windows + Microsoft Excel + `pywin32`** | **KHÔNG** (đọc trực tiếp) |
+| `libreoffice` | `.xlsb`, `.xls` | LibreOffice (`soffice`) | Có (1 file `.xlsx` tạm) |
+| `auto` (mặc định) | tự chọn | — | tùy engine |
 
-  LibreOffice tính lại (recalculate) và lưu giá trị khi convert, nên cả công thức
-  và giá trị đều còn nguyên. Nếu không có LibreOffice, script báo lỗi rõ ràng với
-  file nhị phân.
+`auto`: `.xlsx/.xlsm` → openpyxl; còn lại → COM nếu có Excel trên Windows, không thì LibreOffice.
+
+### Khi nào dùng `--engine com` (khuyến nghị trên máy Windows có Excel)
+
+openpyxl không đọc được định dạng nhị phân, và `pyxlsb` chỉ lấy *giá trị* chứ
+không lấy *chuỗi công thức*. Engine `com` mở file bằng chính Microsoft Excel
+(qua `pywin32`) ở chế độ chỉ-đọc và lấy thẳng `.Formula` / `.Value` — **không
+convert, không ghi bất kỳ file nào ra đĩa**. Đây là lựa chọn tốt nhất khi:
+- Máy có Excel sẵn, và
+- Không ghi được file convert vào ổ C: (thư mục tạm bị khóa).
+
+```powershell
+pip install pywin32
+python excel_indexer.py build "C:\path\bao_cao.xlsb" --engine com --out .\wb_index
+```
+
+Chi tiết engine COM: dùng `DispatchEx` để mở một tiến trình Excel riêng (không
+đụng workbook bạn đang mở), ép `ReferenceStyle = A1`, đọc theo từng UsedRange,
+rồi `Quit()`. Yêu cầu Excel đã cài trên máy.
+
+### Engine `libreoffice` (khi không có Excel)
+
+LibreOffice tính lại (recalculate) và lưu giá trị khi convert sang `.xlsx`, nên
+cả công thức và giá trị đều còn nguyên.
+
+```bash
+sudo apt-get install -y libreoffice-calc   # cung cấp lệnh `soffice`
+# Nếu KHÔNG ghi được vào ổ C:/thư mục tạm, trỏ nơi ghi file convert sang ổ khác:
+python3 excel_indexer.py build bao_cao.xlsb --engine libreoffice --workdir D:\tmp
+```
 
 ## Quy trình
 
@@ -58,8 +85,8 @@ pip install openpyxl
 
 ```bash
 python3 excel_indexer.py build /duong/dan/workbook.xlsb
-# hoặc chỉ định thư mục output:
-python3 excel_indexer.py build workbook.xlsb --out ./wb_index
+# chỉ định engine + thư mục output:
+python3 excel_indexer.py build workbook.xlsb --engine com --out ./wb_index
 ```
 
 Sinh ra `index.json` + `summary.md` (mặc định cạnh file gốc, hoặc trong `--out`).
@@ -122,9 +149,13 @@ Khi được hỏi "cell này nghĩa là gì":
 
 ## Lưu ý & giới hạn
 
-- **Giá trị cache**: file do openpyxl tạo (không qua Excel/LibreOffice) có thể
-  không có sẵn giá trị cho công thức. File thực tế từ Excel hoặc đã qua convert
-  LibreOffice thì có. Script không tự tính lại công thức.
+- **Giá trị cache**: engine `com` và `libreoffice` luôn có giá trị (Excel/
+  LibreOffice tính lại khi mở/convert). Với engine `openpyxl`, file phải đã được
+  Excel/LibreOffice lưu trước đó thì mới có giá trị cache; bản thân script không
+  tự tính công thức.
+- **Engine COM (`pywin32`)**: chỉ chạy trên Windows có Microsoft Excel; chỉ đọc
+  được *classic comments* (threaded comments mới có thể bị bỏ qua). Không ghi
+  file convert ra đĩa.
 - **Range lớn / cả cột** (vd `A:A` hay range > 4096 ô): không bung ra từng ô để
   tránh phình to; được ghi dưới mục "Depends on (ranges / names)" và vẫn tính vào
   liên kết sheet. Chỉnh `MAX_RANGE_EXPANSION` trong script nếu cần.
@@ -139,8 +170,10 @@ Khi được hỏi "cell này nghĩa là gì":
 ## Ví dụ nhanh (end-to-end)
 
 ```bash
-python3 excel_indexer.py build báo_cáo.xlsb            # -> index.json, summary.md
+# Windows + Excel (không ghi file ra ổ C:):
+python excel_indexer.py build báo_cáo.xlsb --engine com  # -> index.json, summary.md
+# (hoặc bỏ --engine để 'auto' tự chọn COM khi có Excel)
 sed -n '1,40p' summary.md                              # đọc tổng quan + sơ đồ sheet
-python3 excel_indexer.py cell "Tổng hợp!C10" --depth 4 # giải thích 1 cell
-python3 excel_indexer.py find "IF(" --index index.json # audit công thức IF
+python excel_indexer.py cell "Tổng hợp!C10" --depth 4  # giải thích 1 cell
+python excel_indexer.py find "IF(" --index index.json  # audit công thức IF
 ```

@@ -17,13 +17,26 @@ Why a build step? Re-parsing a large workbook for every question is slow. The
 `build` step does the heavy parsing once; the other commands read `index.json`,
 so answering "what does cell X mean?" is instant.
 
-xlsb / xls note
----------------
+Reading engines (pick with `build --engine`)
+--------------------------------------------
 openpyxl cannot read the binary .xlsb / .xls formats, and pyxlsb only exposes
-cached *values* (not formula strings). So for those formats this tool first
-converts the workbook to .xlsx with LibreOffice headless
-(`soffice --headless --convert-to xlsx`). LibreOffice recalculates and stores
-cached values during conversion, so both formulas and values survive.
+cached *values* (not formula strings). So `build` supports several engines:
+
+* `openpyxl`    : reads .xlsx / .xlsm directly (no Excel needed).
+* `com`         : Windows + Microsoft Excel via pywin32. Opens the workbook
+                  (including .xlsb) read-only and reads `.Formula` / `.Value`
+                  DIRECTLY -- NO conversion, NO temp file written to disk.
+                  Best when you have Excel and cannot write converted files
+                  (e.g. locked-down C: drive).
+* `libreoffice` : converts the binary workbook to .xlsx via LibreOffice headless
+                  (`soffice --headless --convert-to xlsx`) then reads it. Use
+                  `--workdir` to control where the temp .xlsx is written (e.g. a
+                  drive you can write to). LibreOffice recalculates and stores
+                  cached values during conversion, so both formulas and values
+                  survive.
+
+`--engine auto` (default) chooses: openpyxl for .xlsx/.xlsm; otherwise Excel COM
+if available on Windows, else LibreOffice.
 """
 
 from __future__ import annotations
@@ -31,7 +44,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -60,25 +72,30 @@ def find_soffice() -> str | None:
     return None
 
 
-def convert_to_xlsx(path: str) -> str:
+def convert_to_xlsx(path: str, workdir: str | None = None) -> str:
     """Convert a binary workbook (.xlsb/.xls) to .xlsx via LibreOffice headless.
 
-    Returns the path to the produced .xlsx file (in a temp dir that the caller
-    is responsible for not deleting until done).
+    ``workdir`` controls where the converted .xlsx (and LibreOffice profile) are
+    written -- point it at a writable location if the default temp dir / C:
+    drive is locked down. Returns the path to the produced .xlsx file.
     """
     soffice = find_soffice()
     if not soffice:
         sys.exit(
             "ERROR: this file needs LibreOffice to read formulas, but neither "
             "'soffice' nor 'libreoffice' is on PATH.\n"
-            "Install it, e.g.:  sudo apt-get install -y libreoffice-calc"
+            "Install it (e.g. `sudo apt-get install -y libreoffice-calc`), or on "
+            "Windows with Excel use `--engine com` instead (no conversion)."
         )
-    out_dir = tempfile.mkdtemp(prefix="xlsx_convert_")
+    if workdir:
+        os.makedirs(workdir, exist_ok=True)
+    out_dir = tempfile.mkdtemp(prefix="xlsx_convert_", dir=workdir)
     # A dedicated profile dir avoids clashes with any running LibreOffice.
-    profile = tempfile.mkdtemp(prefix="lo_profile_")
+    profile = tempfile.mkdtemp(prefix="lo_profile_", dir=workdir)
+    profile_url = "file:///" + os.path.abspath(profile).replace(os.sep, "/").lstrip("/")
     cmd = [
         soffice,
-        "-env:UserInstallation=file://" + profile,
+        "-env:UserInstallation=" + profile_url,
         "--headless",
         "--calc",
         "--convert-to",
@@ -98,14 +115,29 @@ def convert_to_xlsx(path: str) -> str:
     return produced
 
 
-def normalize_workbook(path: str) -> tuple[str, bool]:
-    """Return (xlsx_path, was_converted)."""
+def _com_available() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import win32com.client  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def choose_engine(path: str, requested: str) -> str:
     ext = os.path.splitext(path)[1].lower()
+    if ext not in (".xlsx", ".xlsm", ".xlsb", ".xls"):
+        sys.exit(f"ERROR: unsupported extension '{ext}'. Use xlsx/xlsm/xlsb/xls.")
+    if requested != "auto":
+        return requested
     if ext in (".xlsx", ".xlsm"):
-        return path, False
-    if ext in (".xlsb", ".xls"):
-        return convert_to_xlsx(path), True
-    sys.exit(f"ERROR: unsupported extension '{ext}'. Use xlsx/xlsm/xlsb/xls.")
+        return "openpyxl"
+    if _com_available():
+        return "com"
+    if find_soffice():
+        return "libreoffice"
+    return "com" if sys.platform.startswith("win") else "libreoffice"
 
 
 # --------------------------------------------------------------------------- #
@@ -178,67 +210,214 @@ def extract_references(formula: str, current_sheet: str) -> tuple[set[str], list
     return cells, bulk
 
 
-# --------------------------------------------------------------------------- #
-# Build
-# --------------------------------------------------------------------------- #
-def build_index(path: str) -> dict:
-    xlsx_path, converted = normalize_workbook(path)
+def _jsonable(v):
+    """Coerce a cell value into something json-serialisable."""
+    import datetime
 
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+        return v.isoformat()
+    try:
+        json.dumps(v)
+        return v
+    except (TypeError, ValueError):
+        return str(v)
+
+
+# --------------------------------------------------------------------------- #
+# Extraction engines
+# --------------------------------------------------------------------------- #
+# Each engine returns a "raw" tuple that the engine-independent `analyze` step
+# turns into the final index:
+#   (sheet_order, sheets_meta, named_ranges, cells_raw)
+# where cells_raw maps "Sheet!A1" -> {"formula"?, "value"?, "comment"?}.
+
+def extract_openpyxl(xlsx_path: str) -> tuple[list, dict, dict, dict]:
     wb_f = load_workbook(xlsx_path, data_only=False, read_only=False)
     wb_v = load_workbook(xlsx_path, data_only=True, read_only=False)
 
-    cells: dict[str, dict] = {}
-    sheet_meta: dict[str, dict] = {}
-    sheet_links: dict[str, set] = defaultdict(set)  # sheet -> sheets it reads
+    cells_raw: dict[str, dict] = {}
+    sheets_meta: dict[str, dict] = {}
 
     for ws in wb_f.worksheets:
         name = ws.title
         wv = wb_v[name]
-        max_row = ws.max_row or 0
-        max_col = ws.max_column or 0
         formula_count = 0
-
         for row in ws.iter_rows():
             for cell in row:
                 val = cell.value
-                if val is None:
+                if val is None and cell.comment is None:
                     continue
                 coord = f"{name}!{cell.coordinate}"
-                is_formula = isinstance(val, str) and val.startswith("=")
                 entry: dict = {}
-                if is_formula:
+                if isinstance(val, str) and val.startswith("="):
                     formula_count += 1
                     entry["formula"] = val
                     cached = wv[cell.coordinate].value
                     if cached is not None:
                         entry["value"] = _jsonable(cached)
-                    precedents, bulk = extract_references(val, name)
-                    if precedents:
-                        entry["precedents"] = sorted(precedents)
-                    if bulk:
-                        entry["precedent_ranges"] = bulk
-                    for p in precedents:
-                        ps = p.split("!", 1)[0]
-                        if ps != name:
-                            sheet_links[name].add(ps)
-                    for b in bulk:
-                        if "!" in b:
-                            bs = b.split("!", 1)[0].strip("'")
-                            if bs != name and bs in wb_f.sheetnames:
-                                sheet_links[name].add(bs)
-                else:
+                elif val is not None:
                     entry["value"] = _jsonable(val)
                 if cell.comment is not None:
                     entry["comment"] = cell.comment.text
-                cells[coord] = entry
-
-        sheet_meta[name] = {
-            "max_row": max_row,
-            "max_col": max_col,
+                if entry:
+                    cells_raw[coord] = entry
+        sheets_meta[name] = {
+            "max_row": ws.max_row or 0,
+            "max_col": ws.max_column or 0,
             "dimensions": ws.dimensions,
             "formula_count": formula_count,
             "state": ws.sheet_state,  # visible / hidden / veryHidden
         }
+
+    named: dict[str, str] = {}
+    try:
+        for name_obj in wb_f.defined_names.values():
+            named[name_obj.name] = name_obj.value
+    except AttributeError:
+        for key in wb_f.defined_names:
+            try:
+                named[key] = wb_f.defined_names[key].value
+            except Exception:
+                pass
+
+    return wb_f.sheetnames, sheets_meta, named, cells_raw
+
+
+def extract_com(path: str) -> tuple[list, dict, dict, dict]:
+    """Read formulas/values directly via Microsoft Excel (pywin32) -- no temp
+    file written to disk. Windows + Excel only."""
+    try:
+        import pythoncom
+        import win32com.client as win32
+    except ImportError:
+        sys.exit(
+            "ERROR: the 'com' engine requires Microsoft Excel and pywin32 on "
+            "Windows.\n  pip install pywin32"
+        )
+
+    state_map = {-1: "visible", 0: "hidden", 2: "veryHidden"}
+    cells_raw: dict[str, dict] = {}
+    sheets_meta: dict[str, dict] = {}
+    sheet_order: list[str] = []
+    named: dict[str, str] = {}
+
+    pythoncom.CoInitialize()
+    # DispatchEx starts a private Excel instance so Quit() never closes a
+    # workbook the user already had open.
+    excel = win32.DispatchEx("Excel.Application")
+    excel.Visible = False
+    excel.DisplayAlerts = False
+    try:
+        # Force A1 style so .Formula is parseable even if Excel is set to R1C1.
+        excel.ReferenceStyle = 1  # xlA1
+    except Exception:
+        pass
+    try:
+        wb = excel.Workbooks.Open(
+            os.path.abspath(path), ReadOnly=True, UpdateLinks=0
+        )
+        try:
+            for ws in wb.Worksheets:
+                name = ws.Name
+                sheet_order.append(name)
+                used = ws.UsedRange
+                first_row, first_col = used.Row, used.Column
+                n_rows, n_cols = used.Rows.Count, used.Columns.Count
+                formulas = used.Formula
+                values = used.Value
+                # A 1x1 UsedRange returns scalars rather than nested tuples.
+                if n_rows == 1 and n_cols == 1:
+                    formulas = ((formulas,),)
+                    values = ((values,),)
+                formula_count = 0
+                for i in range(n_rows):
+                    frow, vrow = formulas[i], values[i]
+                    for j in range(n_cols):
+                        f, v = frow[j], vrow[j]
+                        if f is None and v is None:
+                            continue
+                        coord = (
+                            f"{name}!{get_column_letter(first_col + j)}"
+                            f"{first_row + i}"
+                        )
+                        entry: dict = {}
+                        if isinstance(f, str) and f.startswith("="):
+                            entry["formula"] = f
+                            formula_count += 1
+                            if v is not None:
+                                entry["value"] = _jsonable(v)
+                        elif v is not None:
+                            entry["value"] = _jsonable(v)
+                        elif f is not None:
+                            entry["value"] = _jsonable(f)
+                        if entry:
+                            cells_raw[coord] = entry
+                # Classic (non-threaded) comments.
+                try:
+                    for cm in ws.Comments:
+                        addr = cm.Parent.Address(False, False)
+                        ckey = f"{name}!{addr}"
+                        cells_raw.setdefault(ckey, {})["comment"] = cm.Text()
+                except Exception:
+                    pass
+                try:
+                    state = state_map.get(int(ws.Visible), "visible")
+                except Exception:
+                    state = "visible"
+                sheets_meta[name] = {
+                    "max_row": first_row + n_rows - 1,
+                    "max_col": first_col + n_cols - 1,
+                    "dimensions": used.Address(False, False),
+                    "formula_count": formula_count,
+                    "state": state,
+                }
+            try:
+                for nm in wb.Names:
+                    try:
+                        named[str(nm.Name)] = str(nm.RefersTo)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        finally:
+            wb.Close(SaveChanges=False)
+    finally:
+        excel.Quit()
+        pythoncom.CoUninitialize()
+
+    return sheet_order, sheets_meta, named, cells_raw
+
+
+# --------------------------------------------------------------------------- #
+# Build (engine dispatch + engine-independent analysis)
+# --------------------------------------------------------------------------- #
+def analyze(sheet_order, sheets_meta, named, cells_raw, source, engine, converted):
+    """Add precedents / dependents / sheet links to the raw cell data."""
+    sheetnames = set(sheet_order)
+    cells = cells_raw
+    sheet_links: dict[str, set] = defaultdict(set)
+
+    for coord, entry in cells.items():
+        formula = entry.get("formula")
+        if not formula:
+            continue
+        name = coord.rsplit("!", 1)[0]
+        precedents, bulk = extract_references(formula, name)
+        if precedents:
+            entry["precedents"] = sorted(precedents)
+        if bulk:
+            entry["precedent_ranges"] = bulk
+        for p in precedents:
+            ps = p.rsplit("!", 1)[0]
+            if ps != name:
+                sheet_links[name].add(ps)
+        for b in bulk:
+            if "!" in b:
+                bs = b.rsplit("!", 1)[0].strip("'")
+                if bs != name and bs in sheetnames:
+                    sheet_links[name].add(bs)
 
     # Reverse dependency map (dependents).
     dependents: dict[str, set] = defaultdict(set)
@@ -249,36 +428,34 @@ def build_index(path: str) -> dict:
         if coord in cells:
             cells[coord]["dependents"] = sorted(deps)
 
-    # Defined names (named ranges).
-    named = {}
-    try:
-        for name_obj in wb_f.defined_names.values():
-            named[name_obj.name] = name_obj.value
-    except AttributeError:
-        # Older openpyxl exposes defined_names as a dict-like of name->obj.
-        for key in wb_f.defined_names:
-            try:
-                named[key] = wb_f.defined_names[key].value
-            except Exception:
-                pass
-
     return {
-        "source": os.path.abspath(path),
+        "source": os.path.abspath(source),
+        "engine": engine,
         "converted_to_xlsx": converted,
-        "sheet_order": wb_f.sheetnames,
-        "sheets": sheet_meta,
+        "sheet_order": sheet_order,
+        "sheets": sheets_meta,
         "sheet_links": {k: sorted(v) for k, v in sheet_links.items()},
         "named_ranges": named,
         "cells": cells,
     }
 
 
-def _jsonable(v):
-    import datetime
-
-    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
-        return v.isoformat()
-    return v
+def build_index(path: str, engine: str = "auto", workdir: str | None = None) -> dict:
+    engine = choose_engine(path, engine)
+    converted = False
+    if engine == "openpyxl":
+        sheet_order, sheets_meta, named, cells_raw = extract_openpyxl(path)
+    elif engine == "com":
+        sheet_order, sheets_meta, named, cells_raw = extract_com(path)
+    elif engine == "libreoffice":
+        xlsx_path = convert_to_xlsx(path, workdir)
+        converted = True
+        sheet_order, sheets_meta, named, cells_raw = extract_openpyxl(xlsx_path)
+    else:
+        sys.exit(f"ERROR: unknown engine '{engine}'.")
+    return analyze(
+        sheet_order, sheets_meta, named, cells_raw, path, engine, converted
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +466,7 @@ def write_summary(index: dict, out_md: str) -> None:
     lines.append(f"# Workbook index: {os.path.basename(index['source'])}")
     lines.append("")
     lines.append(f"- Source: `{index['source']}`")
+    lines.append(f"- Engine: {index.get('engine', 'openpyxl')}")
     if index["converted_to_xlsx"]:
         lines.append("- Converted from binary format via LibreOffice.")
     total_formulas = sum(s["formula_count"] for s in index["sheets"].values())
@@ -447,6 +625,18 @@ def main(argv=None):
     b = sub.add_parser("build", help="Parse workbook -> index.json + summary.md")
     b.add_argument("file")
     b.add_argument("--out", help="Output dir (default: alongside the workbook)")
+    b.add_argument(
+        "--engine",
+        choices=["auto", "openpyxl", "com", "libreoffice"],
+        default="auto",
+        help="Reading engine. 'com' = MS Excel via pywin32 (no conversion, "
+        "Windows only); 'libreoffice' = convert to xlsx first.",
+    )
+    b.add_argument(
+        "--workdir",
+        help="Writable dir for the LibreOffice conversion output (use a drive "
+        "you can write to if C:/temp is locked down).",
+    )
 
     c = sub.add_parser("cell", help="Explain a single cell")
     c.add_argument("--index", default="index.json")
@@ -465,18 +655,18 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.command == "build":
-        index = build_index(args.file)
+        index = build_index(args.file, engine=args.engine, workdir=args.workdir)
         out_dir = args.out or os.path.dirname(os.path.abspath(args.file))
         os.makedirs(out_dir, exist_ok=True)
         idx_path = os.path.join(out_dir, "index.json")
         md_path = os.path.join(out_dir, "summary.md")
-        with open(idx_path, "w") as fh:
+        with open(idx_path, "w", encoding="utf-8") as fh:
             json.dump(index, fh, ensure_ascii=False, indent=0)
         write_summary(index, md_path)
         n_cells = len(index["cells"])
         n_formulas = sum(s["formula_count"] for s in index["sheets"].values())
         print(f"Indexed {len(index['sheets'])} sheets, {n_cells} non-empty cells, "
-              f"{n_formulas} formulas.")
+              f"{n_formulas} formulas (engine: {index['engine']}).")
         print(f"  index   -> {idx_path}")
         print(f"  summary -> {md_path}")
         return
