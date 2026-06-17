@@ -161,10 +161,12 @@ def _parse_json(raw: str) -> dict:
     """Parse Gemini's JSON response, tolerating stray prose or code fences."""
     try:
         return json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as first_exc:
         match = _JSON_BLOCK_RE.search(raw)
         if not match:
-            raise TranslationError(f"Could not parse JSON from response: {raw!r}") from None
+            raise TranslationError(
+                f"Could not parse JSON from response: {raw!r}"
+            ) from first_exc
         try:
             return json.loads(match.group(0))
         except json.JSONDecodeError as exc:

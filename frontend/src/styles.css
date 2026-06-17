@@ -68,6 +68,12 @@ body {
   color: var(--warn);
 }
 
+.banner--error {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--error);
+}
+
 .controls {
   background: var(--card);
   border: 1px solid var(--border);

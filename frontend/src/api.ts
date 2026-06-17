@@ -6,7 +6,11 @@ import type {
   TranslateResponse,
 } from './types'
 
-const API_BASE = '/api'
+// Defaults to the same-origin "/api" path (works with the Vite dev proxy and
+// any reverse proxy that routes /api/* to the backend). For a deployment where
+// the backend lives on a different origin, set VITE_API_BASE_URL at build time,
+// e.g. VITE_API_BASE_URL=https://api.example.com
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '/api'
 
 export async function fetchLanguages(): Promise<Record<LanguageCode, LanguageInfo>> {
   const res = await fetch(`${API_BASE}/languages`)

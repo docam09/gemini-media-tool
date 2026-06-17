@@ -38,7 +38,10 @@ const LS_KEYS = {
   glossary: 'vnkr.glossary',
   model: 'vnkr.model',
   advancedOpen: 'vnkr.advancedOpen',
+  history: 'vnkr.history',
 } as const
+
+const MAX_HISTORY = 30
 
 function loadString(key: string): string {
   if (typeof window === 'undefined') return ''
@@ -58,6 +61,17 @@ function saveString(key: string, value: string): void {
   }
 }
 
+function loadHistory(): HistoryEntry[] {
+  const raw = loadString(LS_KEYS.history)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as HistoryEntry[]).slice(0, MAX_HISTORY) : []
+  } catch {
+    return []
+  }
+}
+
 function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -74,7 +88,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
-  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
   const [autoSpeak, setAutoSpeak] = useState(true)
   const [backendStatus, setBackendStatus] = useState<{
     geminiConfigured: boolean
@@ -145,6 +159,9 @@ export default function App() {
   useEffect(() => {
     saveString(LS_KEYS.advancedOpen, advancedOpen ? '1' : '0')
   }, [advancedOpen])
+  useEffect(() => {
+    saveString(LS_KEYS.history, JSON.stringify(history))
+  }, [history])
 
   const runTranslate = useCallback(
     async (text: string) => {
@@ -181,7 +198,7 @@ export default function App() {
               createdAt: Date.now(),
             },
             ...prev,
-          ].slice(0, 30),
+          ].slice(0, MAX_HISTORY),
         )
         if (autoSpeak && languages) {
           void speak(res.translation, languages[target].bcp47)
@@ -281,6 +298,12 @@ export default function App() {
       {backendStatus && !backendStatus.geminiConfigured && (
         <div className="banner banner--warn">
           Backend chưa có <code>GEMINI_API_KEY</code>. Đặt biến môi trường rồi khởi động lại server.
+        </div>
+      )}
+
+      {error && (
+        <div className="banner banner--error" role="alert">
+          {error}
         </div>
       )}
 
@@ -470,7 +493,6 @@ export default function App() {
           </div>
         )}
         {note && <div className="note">💡 {note}</div>}
-        {error && <div className="error">{error}</div>}
       </section>
 
       {history.length > 0 && (

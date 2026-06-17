@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import lru_cache
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -108,8 +109,17 @@ app = FastAPI(
 
 # In dev the frontend runs on a separate origin (Vite on :5173). We allow any
 # localhost origin so this also works for Electron / Tauri / file:// embeds.
+# For deployment, list the production frontend origin(s) in the ALLOWED_ORIGINS
+# env var (comma-separated, e.g. "https://translator.example.com"); they are
+# added on top of the localhost rule so dev keeps working.
+def _allowed_origins() -> list[str]:
+    raw = os.environ.get("ALLOWED_ORIGINS", "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=_allowed_origins(),
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=False,
     allow_methods=["*"],
@@ -119,6 +129,14 @@ app.add_middleware(
 
 def _default_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+# Build the Gemini client once per (api_key, model) instead of on every
+# request. The underlying SDK client is reusable across calls, so caching it
+# avoids re-initializing on each translation.
+@lru_cache(maxsize=8)
+def _build_translator(api_key: str, model: str) -> GeminiTranslator:
+    return GeminiTranslator(api_key=api_key, model=model)
 
 
 def _translator(model: str | None = None) -> GeminiTranslator:
@@ -133,7 +151,7 @@ def _translator(model: str | None = None) -> GeminiTranslator:
         )
     chosen = model or _default_model()
     try:
-        return GeminiTranslator(api_key=api_key, model=chosen)
+        return _build_translator(api_key, chosen)
     except Exception as exc:  # noqa: BLE001 — surface SDK init failures as 503
         raise HTTPException(
             status_code=503,
@@ -183,9 +201,9 @@ def diag() -> dict[str, object]:
 
     try:
         result = translator.translate(
-            text="hello",
-            source="English",
-            target="Vietnamese",
+            text="Xin chào",
+            source="Vietnamese",
+            target="Korean",
             style="casual",
         )
     except TranslationError as exc:
