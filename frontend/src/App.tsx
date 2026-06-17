@@ -34,6 +34,7 @@ const PLACEHOLDERS: Record<LanguageCode, string> = {
 }
 
 const LS_KEYS = {
+  apiKey: 'vnkr.apiKey',
   context: 'vnkr.context',
   glossary: 'vnkr.glossary',
   model: 'vnkr.model',
@@ -55,7 +56,11 @@ function loadString(key: string): string {
 function saveString(key: string, value: string): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(key, value)
+    if (value) {
+      window.localStorage.setItem(key, value)
+    } else {
+      window.localStorage.removeItem(key)
+    }
   } catch {
     // localStorage may be unavailable (e.g. Safari private mode)
   }
@@ -90,10 +95,7 @@ export default function App() {
   const [interim, setInterim] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
   const [autoSpeak, setAutoSpeak] = useState(true)
-  const [backendStatus, setBackendStatus] = useState<{
-    geminiConfigured: boolean
-    model: string
-  } | null>(null)
+  const [serverKeyConfigured, setServerKeyConfigured] = useState(false)
   const [models, setModels] = useState<Record<string, ModelInfo>>({})
   const [selectedModel, setSelectedModel] = useState<string>(() => loadString(LS_KEYS.model))
   const [context, setContext] = useState<string>(() => loadString(LS_KEYS.context))
@@ -101,6 +103,11 @@ export default function App() {
   const [advancedOpen, setAdvancedOpen] = useState<boolean>(
     () => loadString(LS_KEYS.advancedOpen) === '1',
   )
+
+  // API key state — the saved key (persisted) and the draft (input field value)
+  const [apiKey, setApiKey] = useState<string>(() => loadString(LS_KEYS.apiKey))
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [showKeyInput, setShowKeyInput] = useState(false)
 
   const recognizerRef = useRef<{ stop: () => void } | null>(null)
   const recognitionSupported = useMemo(isRecognitionSupported, [])
@@ -110,6 +117,8 @@ export default function App() {
     const entry = DIRECTIONS.find((d) => d.value === direction)!
     return { source: entry.source, target: entry.target }
   }, [direction])
+
+  const hasKey = Boolean(apiKey || serverKeyConfigured)
 
   useEffect(() => {
     let cancelled = false
@@ -124,35 +133,23 @@ export default function App() {
       })
     fetchHealth()
       .then((h) => {
-        if (!cancelled) {
-          setBackendStatus({ geminiConfigured: h.gemini_configured, model: h.model })
-        }
+        if (!cancelled) setServerKeyConfigured(h.server_key_configured)
       })
-      .catch(() => {
-        // health check failure is surfaced separately via translate errors
-      })
+      .catch(() => {})
     fetchModels()
       .then((res) => {
         if (cancelled) return
         setModels(res.models)
-        // If nothing saved yet or saved value no longer valid, fall back to
-        // the backend's default so the seg control highlights a real option.
         setSelectedModel((current) => (current && res.models[current] ? current : res.default))
       })
-      .catch(() => {
-        // /models is optional; selectedModel stays as-is
-      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [])
 
-  useEffect(() => {
-    saveString(LS_KEYS.context, context)
-  }, [context])
-  useEffect(() => {
-    saveString(LS_KEYS.glossary, glossary)
-  }, [glossary])
+  useEffect(() => { saveString(LS_KEYS.context, context) }, [context])
+  useEffect(() => { saveString(LS_KEYS.glossary, glossary) }, [glossary])
   useEffect(() => {
     if (selectedModel) saveString(LS_KEYS.model, selectedModel)
   }, [selectedModel])
@@ -162,6 +159,22 @@ export default function App() {
   useEffect(() => {
     saveString(LS_KEYS.history, JSON.stringify(history))
   }, [history])
+
+  const handleSaveKey = useCallback(() => {
+    const trimmed = apiKeyDraft.trim()
+    if (!trimmed) return
+    setApiKey(trimmed)
+    saveString(LS_KEYS.apiKey, trimmed)
+    setApiKeyDraft('')
+    setShowKeyInput(false)
+    setError(null)
+  }, [apiKeyDraft])
+
+  const handleClearKey = useCallback(() => {
+    setApiKey('')
+    saveString(LS_KEYS.apiKey, '')
+    setShowKeyInput(false)
+  }, [])
 
   const runTranslate = useCallback(
     async (text: string) => {
@@ -181,6 +194,7 @@ export default function App() {
           context: context || undefined,
           glossary: glossary || undefined,
           model: selectedModel || undefined,
+          apiKey: apiKey || undefined,
         })
         setOutput(res.translation)
         setRomanization(res.romanization)
@@ -209,7 +223,7 @@ export default function App() {
         setBusy(false)
       }
     },
-    [autoSpeak, context, glossary, languages, selectedModel, source, style, target],
+    [apiKey, autoSpeak, context, glossary, languages, selectedModel, source, style, target],
   )
 
   const handleSubmit = useCallback(
@@ -224,8 +238,6 @@ export default function App() {
     if (!recognitionSupported || !languages) return
     if (listening) {
       recognizerRef.current?.stop()
-      // Don't null out the ref / state yet — wait for onend so any interim
-      // text can still get translated as the final transcript.
       return
     }
     setError(null)
@@ -295,11 +307,68 @@ export default function App() {
         <p className="subtitle">Dịch hội thoại hằng ngày theo thời gian thực — chạy local</p>
       </header>
 
-      {backendStatus && !backendStatus.geminiConfigured && (
-        <div className="banner banner--warn">
-          Backend chưa có <code>GEMINI_API_KEY</code>. Đặt biến môi trường rồi khởi động lại server.
-        </div>
-      )}
+      {/* ---- API Key section ---- */}
+      <section className="apikey-card">
+        {apiKey ? (
+          /* Key is saved — show compact status */
+          <div className="apikey-status">
+            <span className="apikey-ok">🔑 API Key đã lưu</span>
+            <button
+              type="button"
+              className="ghost ghost--sm"
+              onClick={() => { setShowKeyInput((v) => !v); setApiKeyDraft('') }}
+            >
+              {showKeyInput ? 'Huỷ' : 'Đổi key'}
+            </button>
+            {showKeyInput && (
+              <button type="button" className="ghost ghost--sm apikey-clear" onClick={handleClearKey}>
+                Xoá key
+              </button>
+            )}
+          </div>
+        ) : (
+          /* No key yet — show prominent prompt */
+          <div className="apikey-status">
+            <span className="apikey-missing">⚠️ Chưa có Gemini API Key</span>
+            <button
+              type="button"
+              className="ghost ghost--sm"
+              onClick={() => setShowKeyInput((v) => !v)}
+            >
+              {showKeyInput ? 'Huỷ' : 'Nhập key'}
+            </button>
+            <a
+              className="apikey-link"
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Lấy key miễn phí ↗
+            </a>
+          </div>
+        )}
+
+        {showKeyInput && (
+          <form
+            className="apikey-form"
+            onSubmit={(e) => { e.preventDefault(); handleSaveKey() }}
+          >
+            <input
+              className="apikey-input"
+              type="password"
+              value={apiKeyDraft}
+              onChange={(e) => setApiKeyDraft(e.target.value)}
+              placeholder="AIzaSy..."
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+            />
+            <button type="submit" className="primary" disabled={!apiKeyDraft.trim()}>
+              Lưu
+            </button>
+          </form>
+        )}
+      </section>
 
       {error && (
         <div className="banner banner--error" role="alert">
@@ -408,9 +477,7 @@ export default function App() {
                 className="advanced__input advanced__input--mono"
                 value={glossary}
                 onChange={(e) => setGlossary(e.target.value)}
-                placeholder={
-                  'công nợ = 매입채무\nkhấu hao = 감가상각\nhóa đơn GTGT = 부가가치세 세금계산서'
-                }
+                placeholder={'công nợ = 매입채무\nkhấu hao = 감가상각\nhóa đơn GTGT = 부가가치세 세금계산서'}
                 rows={4}
                 maxLength={4000}
                 spellCheck={false}
@@ -464,7 +531,12 @@ export default function App() {
               ? '⏺ Đang nghe... nói xong nhấn Dừng để dịch.'
               : 'Enter hoặc nhấn Dịch để gửi'}
           </span>
-          <button type="submit" className="primary" disabled={busy || !input.trim()}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy || !input.trim() || !hasKey}
+            title={!hasKey ? 'Nhập Gemini API Key để bắt đầu dịch' : undefined}
+          >
             {busy ? 'Đang dịch...' : 'Dịch →'}
           </button>
         </div>
@@ -532,11 +604,6 @@ export default function App() {
       )}
 
       <footer className="footer">
-        {backendStatus && (
-          <span>
-            Model: <code>{backendStatus.model}</code>
-          </span>
-        )}
         {!recognitionSupported && (
           <span className="footer__warn">
             Trình duyệt này không hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome/Edge.

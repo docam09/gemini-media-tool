@@ -74,6 +74,78 @@ body {
   color: var(--error);
 }
 
+/* ---- API key card ---- */
+.apikey-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apikey-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.apikey-ok {
+  color: var(--ok);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.apikey-missing {
+  color: var(--warn);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.apikey-link {
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.apikey-link:hover {
+  text-decoration: underline;
+}
+
+.apikey-clear {
+  color: var(--error);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.apikey-form {
+  display: flex;
+  gap: 8px;
+}
+
+.apikey-input {
+  flex: 1;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  min-width: 0;
+}
+
+.apikey-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.apikey-input::placeholder {
+  color: var(--fg-muted);
+  opacity: 0.6;
+}
+
 .controls {
   background: var(--card);
   border: 1px solid var(--border);

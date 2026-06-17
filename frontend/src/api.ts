@@ -6,11 +6,13 @@ import type {
   TranslateResponse,
 } from './types'
 
-// Defaults to the same-origin "/api" path (works with the Vite dev proxy and
-// any reverse proxy that routes /api/* to the backend). For a deployment where
-// the backend lives on a different origin, set VITE_API_BASE_URL at build time,
-// e.g. VITE_API_BASE_URL=https://api.example.com
+// Defaults to same-origin "/api". For a deployed backend on a different
+// origin, set VITE_API_BASE_URL at build time.
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '/api'
+
+function authHeaders(apiKey?: string): HeadersInit {
+  return apiKey ? { 'X-Gemini-Api-Key': apiKey } : {}
+}
 
 export async function fetchLanguages(): Promise<Record<LanguageCode, LanguageInfo>> {
   const res = await fetch(`${API_BASE}/languages`)
@@ -23,7 +25,7 @@ export async function fetchLanguages(): Promise<Record<LanguageCode, LanguageInf
 
 export async function fetchHealth(): Promise<{
   status: string
-  gemini_configured: boolean
+  server_key_configured: boolean
   model: string
 }> {
   const res = await fetch(`${API_BASE}/healthz`)
@@ -49,10 +51,14 @@ export async function translate(params: {
   context?: string
   glossary?: string
   model?: string
+  apiKey?: string
 }): Promise<TranslateResponse> {
   const res = await fetch(`${API_BASE}/translate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(params.apiKey),
+    },
     body: JSON.stringify({
       text: params.text,
       source: params.source,
@@ -66,15 +72,14 @@ export async function translate(params: {
 
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
-    // Clone the response so we can fall back to text() if the body isn't JSON.
     const cloned = res.clone()
     try {
       const body = (await res.json()) as { detail?: string }
-      if (body.detail) detail = `${detail} \u2014 ${body.detail}`
+      if (body.detail) detail = `${detail} — ${body.detail}`
     } catch {
       try {
         const text = await cloned.text()
-        if (text.trim()) detail = `${detail} \u2014 ${text.trim()}`
+        if (text.trim()) detail = `${detail} — ${text.trim()}`
       } catch {
         // give up
       }
@@ -85,13 +90,15 @@ export async function translate(params: {
   return (await res.json()) as TranslateResponse
 }
 
-export async function fetchDiag(): Promise<{
+export async function fetchDiag(apiKey?: string): Promise<{
   ok: boolean
   stage?: string
   detail?: string
   model?: string
   sample?: string
 }> {
-  const res = await fetch(`${API_BASE}/diag`)
+  const res = await fetch(`${API_BASE}/diag`, {
+    headers: authHeaders(apiKey),
+  })
   return res.json()
 }

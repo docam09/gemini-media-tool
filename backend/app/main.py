@@ -6,6 +6,13 @@ Exposes a small HTTP surface used by the frontend:
 * ``POST /translate``    — translate text between Vietnamese and Korean via Gemini
 * ``GET /languages``     — list of supported language pairs / BCP-47 codes used by
                            the browser Web Speech API on the frontend
+* ``GET /models``        — list of allowed Gemini models with labels for the picker
+* ``GET /diag``          — end-to-end probe (tries a real Gemini call)
+
+API key resolution order (first non-empty value wins):
+  1. ``X-Gemini-Api-Key`` request header  — sent by the frontend when the user
+     has entered their own key in the UI.
+  2. ``GEMINI_API_KEY`` environment variable — server-side key, optional.
 """
 
 from __future__ import annotations
@@ -13,10 +20,10 @@ from __future__ import annotations
 import logging
 import os
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -30,8 +37,6 @@ logging.basicConfig(level=logging.INFO)
 
 LanguageCode = Literal["vi", "ko"]
 
-# Map our internal codes to the BCP-47 locales used by the Web Speech API
-# (SpeechRecognition + SpeechSynthesis) in the browser.
 BCP47: dict[str, str] = {
     "vi": "vi-VN",
     "ko": "ko-KR",
@@ -42,9 +47,6 @@ HUMAN_NAME: dict[str, str] = {
     "ko": "Korean",
 }
 
-# Server-side whitelist of allowed Gemini models. The frontend's model selector
-# sends one of these ids; anything else is rejected so callers can't aim the
-# proxy at arbitrary endpoints.
 ALLOWED_MODELS: dict[str, dict[str, str]] = {
     "gemini-2.5-flash": {
         "label": "Flash",
@@ -65,18 +67,9 @@ class TranslateRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
     source: LanguageCode
     target: LanguageCode
-    # Optional conversational hint that the model can use to disambiguate
-    # casual / daily-conversation phrasing.
     style: Literal["casual", "formal"] = "casual"
-    # Optional free-form context describing the situation / domain (e.g.
-    # "Phong ke toan tai chinh, cong ty Han Quoc"). Passed to Gemini so it
-    # picks domain-appropriate vocabulary.
     context: str | None = Field(default=None, max_length=2000)
-    # Optional glossary text where each line maps a source-language term to its
-    # preferred target-language equivalent. Format is intentionally loose so
-    # the user can paste anything readable; Gemini interprets it.
     glossary: str | None = Field(default=None, max_length=4000)
-    # Optional per-request model override. Must be in ALLOWED_MODELS.
     model: str | None = None
 
 
@@ -102,16 +95,13 @@ app = FastAPI(
     title="VN <-> KR Realtime Translator",
     version="0.1.0",
     description=(
-        "Local backend that proxies Gemini for Vietnamese <-> Korean "
-        "translation. Designed to be paired with the frontend in ../frontend."
+        "Local backend that proxies Gemini for Vietnamese <-> Korean translation. "
+        "Pass the Gemini API key via the X-Gemini-Api-Key header or set GEMINI_API_KEY "
+        "as an environment variable."
     ),
 )
 
-# In dev the frontend runs on a separate origin (Vite on :5173). We allow any
-# localhost origin so this also works for Electron / Tauri / file:// embeds.
-# For deployment, list the production frontend origin(s) in the ALLOWED_ORIGINS
-# env var (comma-separated, e.g. "https://translator.example.com"); they are
-# added on top of the localhost rule so dev keeps working.
+
 def _allowed_origins() -> list[str]:
     raw = os.environ.get("ALLOWED_ORIGINS", "")
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
@@ -131,41 +121,60 @@ def _default_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
-# Build the Gemini client once per (api_key, model) instead of on every
-# request. The underlying SDK client is reusable across calls, so caching it
-# avoids re-initializing on each translation.
+# ---------------------------------------------------------------------------
+# API key resolution
+# ---------------------------------------------------------------------------
+
+def _require_api_key(
+    x_gemini_api_key: Annotated[str | None, Header()] = None,
+) -> str:
+    """Resolve the Gemini API key from the request header or the environment.
+
+    Header ``X-Gemini-Api-Key`` wins over the env var so that a user-supplied
+    key always takes priority over a server-side default.
+    """
+    key = (x_gemini_api_key or "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Gemini API key is required. Enter your key in the app UI or set "
+                "GEMINI_API_KEY on the server. Get a free key at "
+                "https://aistudio.google.com/apikey"
+            ),
+        )
+    return key
+
+
+ApiKey = Annotated[str, Depends(_require_api_key)]
+
+
+# ---------------------------------------------------------------------------
+# Translator cache
+# ---------------------------------------------------------------------------
+
 @lru_cache(maxsize=8)
 def _build_translator(api_key: str, model: str) -> GeminiTranslator:
     return GeminiTranslator(api_key=api_key, model=model)
 
 
-def _translator(model: str | None = None) -> GeminiTranslator:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "GEMINI_API_KEY is not configured on the backend. "
-                "Set it in backend/.env or export it before starting the server."
-            ),
-        )
+def _translator(api_key: str, model: str | None = None) -> GeminiTranslator:
     chosen = model or _default_model()
     try:
         return _build_translator(api_key, chosen)
-    except Exception as exc:  # noqa: BLE001 — surface SDK init failures as 503
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=503,
             detail=f"Failed to initialize Gemini client: {exc}",
         ) from exc
 
 
+# ---------------------------------------------------------------------------
+# Error handler
+# ---------------------------------------------------------------------------
+
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Surface any uncaught exception as JSON so the frontend can show the message.
-
-    Without this handler, FastAPI returns a plain "Internal Server Error" body
-    on a 500 which is not useful for debugging from the UI.
-    """
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
@@ -173,11 +182,17 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
     )
 
 
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 @app.get("/healthz")
 def healthz() -> dict[str, object]:
+    """Liveness probe. Does NOT require an API key."""
     return {
         "status": "ok",
-        "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
+        # True if a server-side env key is configured (user key not needed).
+        "server_key_configured": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
         "model": _default_model(),
     }
 
@@ -188,14 +203,10 @@ def models() -> ModelsResponse:
 
 
 @app.get("/diag")
-def diag() -> dict[str, object]:
-    """End-to-end probe: tries a tiny Gemini call and returns the raw outcome.
-
-    Useful for distinguishing between "env not loaded", "bad API key",
-    "model name wrong", and "network blocked" when /translate returns 500.
-    """
+def diag(api_key: ApiKey) -> dict[str, object]:
+    """End-to-end probe: tries a tiny Gemini call and returns the raw outcome."""
     try:
-        translator = _translator()
+        translator = _translator(api_key)
     except HTTPException as http_exc:
         return {"ok": False, "stage": "init", "detail": http_exc.detail}
 
@@ -227,7 +238,7 @@ def languages() -> LanguagesResponse:
 
 
 @app.post("/translate", response_model=TranslateResponse)
-def translate(req: TranslateRequest) -> TranslateResponse:
+def translate(req: TranslateRequest, api_key: ApiKey) -> TranslateResponse:
     if req.source == req.target:
         raise HTTPException(status_code=400, detail="source and target must differ")
 
@@ -241,7 +252,7 @@ def translate(req: TranslateRequest) -> TranslateResponse:
         )
 
     chosen_model = req.model or _default_model()
-    translator = _translator(chosen_model)
+    translator = _translator(api_key, chosen_model)
     try:
         result = translator.translate(
             text=req.text,
