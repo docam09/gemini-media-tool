@@ -50,6 +50,18 @@ export default function ProgressApp() {
     void reload()
   }, [reload])
 
+  // Auto-refresh so teammates on the LAN see each other's updates without
+  // reloading the page. Skip while a field is focused so we don't yank a
+  // value out from under someone who is typing or dragging a slider.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      void reload()
+    }, 10000)
+    return () => window.clearInterval(id)
+  }, [reload])
+
   const tasksByMember = useMemo(() => {
     const map = new Map<number, Task[]>()
     for (const t of tasks) {
@@ -95,9 +107,15 @@ export default function ProgressApp() {
   return (
     <div className="progress">
       <header className="progress-header">
-        <h1>Theo dõi tiến độ nhóm</h1>
+        <div className="progress-header-row">
+          <h1>Theo dõi tiến độ nhóm</h1>
+          <button className="link" onClick={() => void reload()} title="Làm mới ngay">
+            ↻ Làm mới
+          </button>
+        </div>
         <p className="muted">
           Quản lý công việc của từng thành viên và xem mức độ hoàn thành theo thời gian thực.
+          <span className="live-dot" /> Tự đồng bộ mỗi 10 giây — mọi người cùng mạng đều thấy.
         </p>
       </header>
 

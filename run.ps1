@@ -47,6 +47,24 @@ if (-not (Test-Path (Join-Path $frontend "node_modules"))) {
 }
 
 # --------------------------------------------------------------------------
+# Mo cong tuong lua 5173 de may khac trong mang LAN truy cap duoc
+# (can quyen Administrator; neu khong co se huong dan thu cong)
+# --------------------------------------------------------------------------
+$ruleName = "Team Progress Tracker (5173)"
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+    if ($isAdmin) {
+        Write-Host "==> Mo cong tuong lua 5173 cho mang LAN..." -ForegroundColor Cyan
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -LocalPort 5173 `
+            -Protocol TCP -Action Allow -Profile Private | Out-Null
+    } else {
+        Write-Host "!! Chua mo cong tuong lua (can quyen Admin). Neu may khac KHONG vao duoc," -ForegroundColor Yellow
+        Write-Host "   mo PowerShell bang 'Run as administrator' va chay 1 lan lenh:" -ForegroundColor Yellow
+        Write-Host "   New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -LocalPort 5173 -Protocol TCP -Action Allow" -ForegroundColor Yellow
+    }
+}
+
+# --------------------------------------------------------------------------
 # Khoi chay 2 server trong 2 cua so rieng
 # --------------------------------------------------------------------------
 Write-Host "==> Khoi dong backend tai cong 8000..." -ForegroundColor Green
@@ -65,6 +83,24 @@ Write-Host "==> Cho frontend san sang..." -ForegroundColor Cyan
 Start-Sleep -Seconds 7
 Start-Process "http://localhost:5173/"
 
+# Tim dia chi IP LAN (adapter dang hoat dong, co default gateway) de chia se.
+$lanIp = $null
+try {
+    $lanIp = (Get-NetIPConfiguration |
+        Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' } |
+        Select-Object -First 1).IPv4Address.IPAddress
+} catch { }
+
 Write-Host ""
 Write-Host "Xong! Da mo 2 cua so (backend + frontend) va trinh duyet." -ForegroundColor Green
 Write-Host "GIU NGUYEN 2 cua so do trong luc dung app. Dong chung lai = tat server." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "==================================================================" -ForegroundColor Green
+Write-Host " CHIA SE CHO DONG NGHIEP (cung mang LAN/Wi-Fi cong ty):" -ForegroundColor Green
+if ($lanIp) {
+    Write-Host ("   http://{0}:5173/" -f $lanIp) -ForegroundColor White
+} else {
+    Write-Host "   http://<DIA-CHI-IP-MAY-NAY>:5173/   (chay 'ipconfig' de xem IPv4)" -ForegroundColor White
+}
+Write-Host " (May ban phai dang bat va giu 2 cua so server nay chay)" -ForegroundColor Green
+Write-Host "==================================================================" -ForegroundColor Green

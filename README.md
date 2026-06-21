@@ -40,6 +40,23 @@ Sau khi đã cài Git, Node.js và Python 3.11, chỉ cần **nhấp đúp `star
 đầu), mở 2 cửa sổ chạy backend + frontend rồi mở trình duyệt tới
 `http://localhost:5173/`. Giữ nguyên 2 cửa sổ đó trong lúc dùng app.
 
+### Cho cả nhóm cùng dùng (mạng LAN)
+
+App chia sẻ chung một dữ liệu (SQLite `backend/progress.db`), nên nhiều người
+có thể cùng xem và cập nhật. Để đồng nghiệp **cùng mạng văn phòng/Wi-Fi** vào
+được:
+
+1. Chạy `start.bat` trên **một máy** (máy này đóng vai trò "máy chủ", phải bật
+   và giữ 2 cửa sổ server chạy).
+2. Script sẽ in ra địa chỉ dạng `http://192.168.x.x:5173/` — gửi link này cho
+   mọi người. Họ chỉ cần mở trên trình duyệt cùng mạng, không cần cài gì.
+3. Lần đầu, nếu máy khác chưa vào được, mở cổng tường lửa: chạy `start.bat`
+   bằng **Run as administrator** một lần (script tự thêm rule cho cổng 5173).
+4. Trang **tự đồng bộ mỗi 10 giây** nên ai sửa thì người khác thấy ngay.
+
+> Lưu ý: đây là chia sẻ trong mạng nội bộ, không có đăng nhập — ai có link đều
+> xem/sửa được. Muốn truy cập từ xa qua Internet thì cần deploy lên cloud.
+
 ---
 
 # Việt ↔ Hàn Realtime Translator
