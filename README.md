@@ -1,3 +1,64 @@
+# Bộ công cụ: Dịch realtime + Theo dõi tiến độ nhóm
+
+Ứng dụng có **2 tab** (chọn ở thanh trên cùng):
+
+- **📊 Tiến độ nhóm** — theo dõi công việc của từng thành viên trong nhóm và
+  xem biểu đồ mức độ hoàn thành (xem [Theo dõi tiến độ nhóm](#theo-dõi-tiến-độ-nhóm)).
+- **🌐 Trình dịch** — dịch hội thoại Việt ↔ Hàn realtime (mô tả bên dưới).
+
+## Theo dõi tiến độ nhóm
+
+App theo dõi tiến độ công việc của các thành viên trong một nhóm:
+
+- Thêm / xóa thành viên (kèm vai trò).
+- Giao công việc cho từng người; cập nhật trạng thái (Chưa làm / Đang làm /
+  Hoàn thành) và phần trăm tiến độ bằng thanh kéo.
+- **Biểu đồ mức độ hoàn thành**: vòng tròn tổng quan của cả nhóm + thanh ngang
+  cho từng thành viên, đổi màu theo mức độ.
+- Dữ liệu lưu trong SQLite (`backend/progress.db`) nên không mất khi khởi động
+  lại server. Không cần Gemini API key cho tab này.
+
+API (backend FastAPI, đã mount sẵn):
+
+| Method   | Endpoint                  | Mô tả                                   |
+| -------- | ------------------------- | --------------------------------------- |
+| `GET`    | `/progress/members`       | Danh sách thành viên kèm thống kê       |
+| `POST`   | `/progress/members`       | Thêm thành viên `{name, role}`          |
+| `DELETE` | `/progress/members/{id}`  | Xóa thành viên (và các việc của họ)     |
+| `GET`    | `/progress/tasks`         | Danh sách công việc (lọc `?member_id=`) |
+| `POST`   | `/progress/tasks`         | Thêm công việc                          |
+| `PATCH`  | `/progress/tasks/{id}`    | Cập nhật trạng thái / tiến độ           |
+| `DELETE` | `/progress/tasks/{id}`    | Xóa công việc                           |
+| `GET`    | `/progress/summary`       | Tổng hợp % hoàn thành theo người + nhóm |
+
+Cách chạy giống hệt phần dưới (backend `:8000` + frontend `:5173`).
+
+### Chạy nhanh trên Windows (1 chạm)
+
+Sau khi đã cài Git, Node.js và Python 3.11, chỉ cần **nhấp đúp `start.bat`**
+ở thư mục gốc dự án. Script tự tạo môi trường Python, cài dependencies (lần
+đầu), mở 2 cửa sổ chạy backend + frontend rồi mở trình duyệt tới
+`http://localhost:5173/`. Giữ nguyên 2 cửa sổ đó trong lúc dùng app.
+
+### Cho cả nhóm cùng dùng (mạng LAN)
+
+App chia sẻ chung một dữ liệu (SQLite `backend/progress.db`), nên nhiều người
+có thể cùng xem và cập nhật. Để đồng nghiệp **cùng mạng văn phòng/Wi-Fi** vào
+được:
+
+1. Chạy `start.bat` trên **một máy** (máy này đóng vai trò "máy chủ", phải bật
+   và giữ 2 cửa sổ server chạy).
+2. Script sẽ in ra địa chỉ dạng `http://192.168.x.x:5173/` — gửi link này cho
+   mọi người. Họ chỉ cần mở trên trình duyệt cùng mạng, không cần cài gì.
+3. Lần đầu, nếu máy khác chưa vào được, mở cổng tường lửa: chạy `start.bat`
+   bằng **Run as administrator** một lần (script tự thêm rule cho cổng 5173).
+4. Trang **tự đồng bộ mỗi 10 giây** nên ai sửa thì người khác thấy ngay.
+
+> Lưu ý: đây là chia sẻ trong mạng nội bộ, không có đăng nhập — ai có link đều
+> xem/sửa được. Muốn truy cập từ xa qua Internet thì cần deploy lên cloud.
+
+---
+
 # Việt ↔ Hàn Realtime Translator
 
 Ứng dụng dịch hội thoại hằng ngày song ngữ **Tiếng Việt ↔ 한국어**, chạy local

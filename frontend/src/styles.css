@@ -480,3 +480,369 @@ code {
     align-self: center;
   }
 }
+
+/* ===================================================================== */
+/* Team progress tracker                                                 */
+/* ===================================================================== */
+
+.topnav {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 16px 12px 0;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.topnav button {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.topnav button:hover {
+  color: var(--fg);
+}
+
+.topnav button.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #0b1220;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.progress {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+}
+
+.progress-header h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+}
+
+.progress .muted {
+  color: var(--fg-muted);
+}
+
+.progress .small {
+  font-size: 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin: 16px 0;
+}
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.banner {
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin: 12px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.banner.error {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.progress input[type='text'],
+.progress input:not([type]),
+.progress select {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.progress button {
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.progress button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.progress button.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #0b1220;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.progress button.link {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  padding: 2px 6px;
+}
+
+.progress button.link:hover {
+  color: var(--fg);
+}
+
+.progress button.link.danger:hover {
+  color: var(--error);
+}
+
+/* --- chart --- */
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.chart-stats {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.chart-body {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.donut {
+  width: 140px;
+  height: 140px;
+  flex: 0 0 auto;
+}
+
+.donut-track {
+  fill: none;
+  stroke: var(--bg-3);
+  stroke-width: 14;
+}
+
+.donut-value {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 70px 70px;
+  transition: stroke-dashoffset 0.5s ease;
+}
+
+.donut-num {
+  fill: var(--fg);
+  font-size: 26px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.donut-label {
+  fill: var(--fg-muted);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+.bars {
+  flex: 1 1 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 240px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: var(--label-ch, 10ch) 1fr 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+.bar-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.bar-track {
+  background: var(--bg-3);
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.bar-pct {
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+/* --- members & tasks --- */
+.member-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.member-head h3 {
+  margin: 0 0 2px;
+  font-size: 17px;
+}
+
+.member-head .role {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-size: 14px;
+}
+
+.task-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task {
+  display: grid;
+  grid-template-columns: 1fr auto minmax(80px, 140px) 40px 28px;
+  gap: 10px;
+  align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.task.status-done {
+  border-left-color: var(--ok);
+}
+
+.task.status-in_progress {
+  border-left-color: var(--accent);
+}
+
+.task.status-todo {
+  border-left-color: var(--fg-muted);
+}
+
+.task-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task.status-done .task-title {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+
+.task-progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.task-pct {
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-align: right;
+}
+
+.add-task {
+  margin-top: 6px;
+}
+
+.add-task input {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 600px) {
+  .task {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'title actions'
+      'status status'
+      'slider pct';
+  }
+  .task-title {
+    grid-area: title;
+  }
+  .task select {
+    grid-area: status;
+  }
+  .task-progress {
+    grid-area: slider;
+  }
+  .task-pct {
+    grid-area: pct;
+  }
+  .task .link.danger {
+    grid-area: actions;
+  }
+}
+
+.progress-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin: 0 4px 0 8px;
+  vertical-align: middle;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

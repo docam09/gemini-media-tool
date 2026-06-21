@@ -21,6 +21,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.gemini import GeminiTranslator, TranslationError
+from app.progress import init_db
+from app.progress import router as progress_router
 
 load_dotenv()
 
@@ -115,6 +117,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Team work-progress tracker (SQLite-backed, independent of Gemini).
+init_db()
+app.include_router(progress_router)
 
 
 def _default_model() -> str:
