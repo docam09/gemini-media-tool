@@ -33,6 +33,13 @@ API (backend FastAPI, đã mount sẵn):
 
 Cách chạy giống hệt phần dưới (backend `:8000` + frontend `:5173`).
 
+### Chạy nhanh trên Windows (1 chạm)
+
+Sau khi đã cài Git, Node.js và Python 3.11, chỉ cần **nhấp đúp `start.bat`**
+ở thư mục gốc dự án. Script tự tạo môi trường Python, cài dependencies (lần
+đầu), mở 2 cửa sổ chạy backend + frontend rồi mở trình duyệt tới
+`http://localhost:5173/`. Giữ nguyên 2 cửa sổ đó trong lúc dùng app.
+
 ---
 
 # Việt ↔ Hàn Realtime Translator
