@@ -1,3 +1,40 @@
+# Bộ công cụ: Dịch realtime + Theo dõi tiến độ nhóm
+
+Ứng dụng có **2 tab** (chọn ở thanh trên cùng):
+
+- **📊 Tiến độ nhóm** — theo dõi công việc của từng thành viên trong nhóm và
+  xem biểu đồ mức độ hoàn thành (xem [Theo dõi tiến độ nhóm](#theo-dõi-tiến-độ-nhóm)).
+- **🌐 Trình dịch** — dịch hội thoại Việt ↔ Hàn realtime (mô tả bên dưới).
+
+## Theo dõi tiến độ nhóm
+
+App theo dõi tiến độ công việc của các thành viên trong một nhóm:
+
+- Thêm / xóa thành viên (kèm vai trò).
+- Giao công việc cho từng người; cập nhật trạng thái (Chưa làm / Đang làm /
+  Hoàn thành) và phần trăm tiến độ bằng thanh kéo.
+- **Biểu đồ mức độ hoàn thành**: vòng tròn tổng quan của cả nhóm + thanh ngang
+  cho từng thành viên, đổi màu theo mức độ.
+- Dữ liệu lưu trong SQLite (`backend/progress.db`) nên không mất khi khởi động
+  lại server. Không cần Gemini API key cho tab này.
+
+API (backend FastAPI, đã mount sẵn):
+
+| Method   | Endpoint                  | Mô tả                                   |
+| -------- | ------------------------- | --------------------------------------- |
+| `GET`    | `/progress/members`       | Danh sách thành viên kèm thống kê       |
+| `POST`   | `/progress/members`       | Thêm thành viên `{name, role}`          |
+| `DELETE` | `/progress/members/{id}`  | Xóa thành viên (và các việc của họ)     |
+| `GET`    | `/progress/tasks`         | Danh sách công việc (lọc `?member_id=`) |
+| `POST`   | `/progress/tasks`         | Thêm công việc                          |
+| `PATCH`  | `/progress/tasks/{id}`    | Cập nhật trạng thái / tiến độ           |
+| `DELETE` | `/progress/tasks/{id}`    | Xóa công việc                           |
+| `GET`    | `/progress/summary`       | Tổng hợp % hoàn thành theo người + nhóm |
+
+Cách chạy giống hệt phần dưới (backend `:8000` + frontend `:5173`).
+
+---
+
 # Việt ↔ Hàn Realtime Translator
 
 Ứng dụng dịch hội thoại hằng ngày song ngữ **Tiếng Việt ↔ 한국어**, chạy local
