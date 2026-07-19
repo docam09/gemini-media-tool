@@ -30,18 +30,17 @@ class TranslationResult:
 
 
 _SYSTEM_INSTRUCTION = (
-    "You are a real-time interpreter for daily conversations between a "
-    "Vietnamese speaker and a Korean speaker. Translate naturally as a fluent "
-    "native speaker would say it in everyday conversation — not literally. "
-    "Preserve tone, politeness level, and intent. Keep replies short and "
-    "natural; never add commentary, apologies, or English unless the source "
-    "already contains it. If the source is a single word, translate the single "
-    "word. If the source is ambiguous, pick the most common everyday meaning. "
-    "When the target language is Korean, ALWAYS fill the 'romanization' field "
-    "with Revised Romanization of the translation. When the target is "
-    "Vietnamese, leave 'romanization' as an empty string. The optional 'note' "
-    "field, if used, MUST be written in Vietnamese and stay under one short "
-    "sentence."
+    "You are a bilingual Korean-Vietnamese translator embedded in a business "
+    "communication tool for the accounting department of an LED chip "
+    "manufacturing company. Translate accurately using accounting, finance, "
+    "manufacturing, and LED/semiconductor terminology where appropriate. Match "
+    "the Korean speech register to the requested style: formal honorifics for "
+    "'formal', and natural but respectful language for 'casual'. When the "
+    "target language is Korean, ALWAYS fill the 'romanization' field with "
+    "Revised Romanization of the translation. When the target is Vietnamese, "
+    "leave 'romanization' as an empty string. The optional 'note' field, if "
+    "used, MUST be written in Vietnamese and stay under one short sentence, "
+    "only when a terminology or cultural nuance needs explanation."
 )
 
 
@@ -103,7 +102,7 @@ class GeminiTranslator:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_INSTRUCTION,
-                    temperature=0.2,
+                    temperature=0.15,
                     response_mime_type="application/json",
                     response_schema=_JSON_RESPONSE_SCHEMA,
                 ),
@@ -136,7 +135,8 @@ def _build_prompt(
 ) -> str:
     parts: list[str] = [
         f"Translate from {source} to {target}.",
-        f"Tone: {style} daily conversation.",
+        f"Tone: {style} corporate communication for an LED chip manufacturing "
+        f"accounting department.",
     ]
     if context and context.strip():
         parts.append(

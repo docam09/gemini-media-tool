@@ -65,8 +65,9 @@ class TranslateRequest(BaseModel):
     source: LanguageCode
     target: LanguageCode
     # Optional conversational hint that the model can use to disambiguate
-    # casual / daily-conversation phrasing.
-    style: Literal["casual", "formal"] = "casual"
+    # casual / daily-conversation phrasing. Formal is the default because this
+    # tool is aimed at workplace accounting and manufacturing communication.
+    style: Literal["casual", "formal"] = "formal"
     # Optional free-form context describing the situation / domain (e.g.
     # "Phong ke toan tai chinh, cong ty Han Quoc"). Passed to Gemini so it
     # picks domain-appropriate vocabulary.
@@ -98,11 +99,12 @@ class ModelsResponse(BaseModel):
 
 
 app = FastAPI(
-    title="VN <-> KR Realtime Translator",
-    version="0.1.0",
+    title="VN <-> KR LED Chip & Accounting Translator",
+    version="0.2.0",
     description=(
         "Local backend that proxies Gemini for Vietnamese <-> Korean "
-        "translation. Designed to be paired with the frontend in ../frontend."
+        "translation, tuned for LED chip manufacturing and accounting "
+        "communication. Designed to be paired with the frontend in ../frontend."
     ),
 )
 

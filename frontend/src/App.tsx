@@ -24,13 +24,13 @@ const DIRECTIONS: { value: Direction; source: LanguageCode; target: LanguageCode
   ]
 
 const STYLES: { value: Style; label: string }[] = [
-  { value: 'casual', label: 'Thân mật' },
   { value: 'formal', label: 'Lịch sự' },
+  { value: 'casual', label: 'Thân mật' },
 ]
 
 const PLACEHOLDERS: Record<LanguageCode, string> = {
-  vi: 'Gõ tiếng Việt ở đây... (vd. "Bạn đã ăn cơm chưa?")',
-  ko: '여기에 한국어를 입력하세요... (예: "오늘 날씨 어때요?")',
+  vi: 'Nhập nội dung cần dịch... (vd. "Vui lòng gửi bảng kê chi phí nguyên vật liệu LED tháng này.")',
+  ko: '번역할 내용을 입력하세요... (예: "이번 달 LED 원자재 비용 명세서를 보내주세요.")',
 }
 
 const LS_KEYS = {
@@ -40,12 +40,77 @@ const LS_KEYS = {
   advancedOpen: 'vnkr.advancedOpen',
 } as const
 
-function loadString(key: string): string {
-  if (typeof window === 'undefined') return ''
+const DEFAULT_CONTEXT =
+  'Phòng kế toán tài chính tại công ty sản xuất chip LED Hàn Quốc. Giao tiếp giữa kế toán Việt Nam và đối tác/kiểm toán Hàn Quốc về báo cáo tài chính, chi phí nguyên vật liệu, giá thành sản xuất, hóa đơn, thanh toán, nhập/xuất kho, và kiểm tra chất lượng linh kiện điện tử / bán dẫn.'
+
+const DEFAULT_GLOSSARY = `Kế toán = 회계
+Báo cáo tài chính = 재무제표
+Doanh thu = 매출
+Chi phí = 비용
+Lợi nhuận = 이익
+Tài sản = 자산
+Nợ phải trả = 부채
+Vốn chủ sở hữu = 자본
+Ngân sách = 예산
+Hóa đơn (thuế) = 세금계산서
+Thanh toán = 결제
+Công nợ = 채권채무
+Kiểm toán = 감사
+Thuế = 세금
+Giá thành sản xuất = 제조원가
+Phải thu = 미수금
+Phải trả = 미지급금
+Khấu hao = 감가상각
+Hóa đơn GTGT = 부가가치세 세금계산서
+Tồn kho = 재고
+Tài sản cố định = 고정자산
+Chi phí nguyên vật liệu = 원자재 비용
+Sổ cái = 원장
+Bút toán = 분개
+Số dư = 잔액
+Chip LED = LED 칩
+Bán dẫn = 반도체
+Wafer = 웨이퍼
+Dây chuyền sản xuất = 생산 라인
+Kiểm tra chất lượng = 품질 검사
+Sản phẩm lỗi = 불량품
+Nguyên vật liệu = 원자재
+Linh kiện = 부품
+Lắp ráp = 조립
+Đóng gói (packaging) = 패키징
+Quy trình sản xuất = 생산 공정
+Năng suất = 생산성
+Thiết bị = 장비
+Phòng sạch = 클린룸
+Kiểm soát chất lượng = 품질 관리
+Kỹ sư = 엔지니어
+Sản xuất hàng loạt = 양산
+Phát triển sản phẩm = 제품 개발
+Mạch tích hợp = 집적회로
+Điện áp = 전압
+Dòng điện = 전류
+Công suất = 전력
+Độ sáng (LED) = 밝기
+Màu sắc (LED) = 색상
+Tuổi thọ (sản phẩm) = 수명`
+
+function loadString(key: string, fallback = ''): string {
+  if (typeof window === 'undefined') return fallback
   try {
-    return window.localStorage.getItem(key) ?? ''
+    return window.localStorage.getItem(key) ?? fallback
   } catch {
-    return ''
+    return fallback
+  }
+}
+
+function loadBoolean(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const value = window.localStorage.getItem(key)
+    if (value === null) return fallback
+    return value === '1'
+  } catch {
+    return fallback
   }
 }
 
@@ -65,7 +130,7 @@ function newId(): string {
 export default function App() {
   const [languages, setLanguages] = useState<Record<LanguageCode, LanguageInfo> | null>(null)
   const [direction, setDirection] = useState<Direction>('vi-to-ko')
-  const [style, setStyle] = useState<Style>('casual')
+  const [style, setStyle] = useState<Style>('formal')
   const [input, setInput] = useState('')
   const [output, setOutput] = useState('')
   const [romanization, setRomanization] = useState<string | null>(null)
@@ -82,10 +147,10 @@ export default function App() {
   } | null>(null)
   const [models, setModels] = useState<Record<string, ModelInfo>>({})
   const [selectedModel, setSelectedModel] = useState<string>(() => loadString(LS_KEYS.model))
-  const [context, setContext] = useState<string>(() => loadString(LS_KEYS.context))
-  const [glossary, setGlossary] = useState<string>(() => loadString(LS_KEYS.glossary))
-  const [advancedOpen, setAdvancedOpen] = useState<boolean>(
-    () => loadString(LS_KEYS.advancedOpen) === '1',
+  const [context, setContext] = useState<string>(() => loadString(LS_KEYS.context, DEFAULT_CONTEXT))
+  const [glossary, setGlossary] = useState<string>(() => loadString(LS_KEYS.glossary, DEFAULT_GLOSSARY))
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(() =>
+    loadBoolean(LS_KEYS.advancedOpen, true),
   )
 
   const recognizerRef = useRef<{ stop: () => void } | null>(null)
@@ -274,8 +339,8 @@ export default function App() {
   return (
     <main className="app">
       <header className="app__header">
-        <h1>🗣️ Việt ↔ Hàn</h1>
-        <p className="subtitle">Dịch hội thoại hằng ngày theo thời gian thực — chạy local</p>
+        <h1>Việt ↔ Hàn: LED Chip · Kế toán</h1>
+        <p className="subtitle">Dịch song ngữ chuyên ngành kế toán và sản xuất chip LED — chạy local</p>
       </header>
 
       {backendStatus && !backendStatus.geminiConfigured && (
@@ -370,7 +435,7 @@ export default function App() {
                 className="advanced__input"
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
-                placeholder='Vd. "Phòng kế toán tài chính tại công ty Hàn Quốc, trao đổi về báo cáo tài chính và kiểm toán nội bộ."'
+                placeholder='Vd. "Phòng kế toán tài chính tại công ty sản xuất chip LED Hàn Quốc, trao đổi báo cáo tài chính, giá thành và kiểm toán nội bộ."'
                 rows={2}
                 maxLength={2000}
                 spellCheck={false}
@@ -386,7 +451,7 @@ export default function App() {
                 value={glossary}
                 onChange={(e) => setGlossary(e.target.value)}
                 placeholder={
-                  'công nợ = 매입채무\nkhấu hao = 감가상각\nhóa đơn GTGT = 부가가치세 세금계산서'
+                  'Kế toán = 회계\nBáo cáo tài chính = 재무제표\nChip LED = LED 칩\nKhấu hao = 감가상각'
                 }
                 rows={4}
                 maxLength={4000}
