@@ -1,9 +1,10 @@
-# Việt ↔ Hàn Realtime Translator
+# Việt ↔ Hàn: LED Chip · Kế toán
 
-Ứng dụng dịch hội thoại hằng ngày song ngữ **Tiếng Việt ↔ 한국어**, chạy local
-trên máy bạn. Backend gọi Google Gemini cho phần dịch, frontend dùng Web Speech
-API của Chrome cho nhận dạng giọng nói (STT) và đọc kết quả (TTS) — không cần
-trả thêm phí cho dịch vụ TTS/STT.
+Ứng dụng dịch song ngữ **Tiếng Việt ↔ 한국어** chuyên ngành cho **phòng kế toán
+và sản xuất chip LED**, chạy local trên máy bạn. Backend gọi Google Gemini cho
+phần dịch chuyên ngành, frontend dùng Web Speech API của Chrome cho nhận dạng
+giọng nói (STT) và đọc kết quả (TTS) — không cần trả thêm phí cho dịch vụ
+TTS/STT.
 
 ```
 ┌────────────────────┐       ┌──────────────────────┐       ┌────────────┐
@@ -18,15 +19,15 @@ trả thêm phí cho dịch vụ TTS/STT.
 - Dịch hai chiều VI ↔ KO theo thời gian thực
 - Nhập bằng giọng nói (mic) hoặc gõ text
 - Đọc to kết quả bằng giọng bản ngữ của hệ điều hành
-- Hiển thị phiên âm (Revised Romanization) khi dịch sang tiếng Hàn — hữu ích
-  khi học
-- Chuyển nhanh giữa phong cách **Thân mật** và **Lịch sự**
+- Hiển thị phiên âm (Revised Romanization) khi dịch sang tiếng Hàn
+- Chuyển nhanh giữa phong cách **Lịch sự** (mặc định) và **Thân mật**
+- Bối cảnh và từ điển công ty mặc định cho ngành kế toán / sản xuất chip LED
 - Lịch sử 30 câu gần nhất, có nút phát lại
 - Chạy hoàn toàn local trên máy bạn (chỉ gọi Gemini ra ngoài)
 
 ## Yêu cầu
 
-- Python 3.11+ và [Poetry](https://python-poetry.org/)
+- Python 3.10+ và [Poetry](https://python-poetry.org/)
 - Node.js 20+ và npm
 - Một Gemini API key (lấy miễn phí: <https://aistudio.google.com/apikey>)
 - **Chrome / Edge** (Firefox/Safari không hỗ trợ Web Speech Recognition đầy đủ)
@@ -51,7 +52,7 @@ npm install
 ```powershell
 # Backend
 cd backend
-py -3.11 -m venv .venv
+py -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 "GEMINI_API_KEY=<key của bạn>" | Out-File -Encoding utf8 .env
@@ -100,10 +101,12 @@ Kết quả sẽ chỉ rõ giai đoạn nào hỏng:
 2. Nhấn **🎤 Nói** rồi nói vào mic — câu sẽ tự động được dịch khi bạn dừng nói.
    Hoặc gõ trực tiếp và bấm **Dịch →**.
 3. Bật **Tự đọc kết quả** để nghe phát âm câu dịch ngay.
-4. Khi dịch sang tiếng Hàn, dòng phiên âm (vd. `annyeong, jal jinae?`) sẽ hiện
+4. Khi dịch sang tiếng Hàn, dòng phiên âm (vd. `jangjeo jepum-ui gaekkeum-eun...`) sẽ hiện
    bên dưới để bạn tập đọc theo.
 5. Bấm nút **↕** để đảo chiều và dùng câu vừa dịch làm input mới — tiện cho
    hội thoại qua lại.
+6. Phần **Nâng cao** đã được điền sẵn bối cảnh ngành và từ điển công ty. Bạn có thể
+   chỉnh sửa hoặc xóa theo nhu cầu.
 
 ## Cấu hình
 
@@ -122,8 +125,8 @@ curl http://localhost:8000/healthz
 
 curl -X POST http://localhost:8000/translate \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Xin chào","source":"vi","target":"ko","style":"casual"}'
-# {"translation":"안녕","romanization":"annyeong","note":null,...}
+  -d '{"text":"Vui lòng gửi bảng kê chi phí nguyên vật liệu LED tháng này","source":"vi","target":"ko","style":"formal"}'
+# {"translation":"...","romanization":"...","note":null,...}
 ```
 
 ## Lệnh hay dùng
