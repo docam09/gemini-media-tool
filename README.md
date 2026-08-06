@@ -122,6 +122,35 @@ npm run dev
 Mở <http://localhost:5173>. Frontend Vite tự proxy `/api/*` về backend nên
 không phải lo CORS hay cấu hình thêm.
 
+## Deploy để dùng trên điện thoại (Render, free)
+
+Mic của trình duyệt chỉ hoạt động qua HTTPS, nên muốn dùng trên iPhone thì phải
+có một địa chỉ https. Repo có sẵn `Dockerfile` + `render.yaml` để deploy **một
+service duy nhất**: backend phục vụ luôn frontend đã build (API nằm dưới
+`/api`), đúng như frontend gọi khi chạy local.
+
+1. Tạo tài khoản tại <https://render.com> → **New** → **Blueprint** → chọn repo
+   này. Render đọc `render.yaml` và hỏi 3 biến môi trường:
+   - `GEMINI_API_KEY` — dịch chữ + kiểm tra dịch ngược
+   - `SONIOX_API_KEY` — chế độ phiên dịch trực tiếp
+   - `APP_PASSWORD` — mật khẩu chung cho cả trang (xem cảnh báo bên dưới)
+2. Chờ build (~5 phút) rồi mở `https://<tên-app>.onrender.com`, *Add to Home
+   screen* để dùng như app.
+
+> **Ai có link cũng đang tiêu API key của bạn.** Luôn đặt `APP_PASSWORD`: trình
+> duyệt sẽ hỏi mật khẩu trước khi vào (tên đăng nhập gõ gì cũng được). Bỏ trống
+> biến này thì trang thành công khai.
+
+Gói free của Render **ngủ sau 15 phút không ai dùng**, lần mở lại đầu tiên chờ
+~50 giây. Trước cuộc họp quan trọng thì mở trang trước một lần cho nó thức.
+
+Tự chạy Docker ở chỗ khác cũng được — image không phụ thuộc gì vào Render:
+
+```bash
+docker build -t vnkr .
+docker run -p 8000:8000 -e GEMINI_API_KEY=... -e SONIOX_API_KEY=... -e APP_PASSWORD=... vnkr
+```
+
 ## Khắc phục sự cố
 
 Nếu Dịch trả lỗi, gọi endpoint chẩn đoán:
@@ -171,6 +200,7 @@ Backend đọc các biến môi trường sau (từ `backend/.env` hoặc shell)
 | `GEMINI_MODEL`   | `gemini-2.5-flash-lite` | Phải là một model trong `GET /models`     |
 | `SONIOX_API_KEY` | _(tùy chọn)_            | Bật chế độ phiên dịch trực tiếp          |
 | `SONIOX_MODEL`   | `stt-rt-v5`             | Model realtime của Soniox                 |
+| `APP_PASSWORD`   | _(tùy chọn)_            | Mật khẩu chung khi deploy (`app/serve.py`) |
 
 Key Soniox không bao giờ được gửi ra trình duyệt: backend dùng nó để tạo
 temporary key (`expires_in_seconds=120`, `max_session_duration_seconds=3600`)
@@ -217,7 +247,8 @@ curl -X POST http://localhost:8000/verify \
 | `POST /translate/stream` | Dịch, stream từng đoạn qua SSE                       |
 | `POST /verify`           | Dịch ngược + ghi chú, để soát câu quan trọng         |
 | `POST /soniox/session`   | Temporary key + session config cho mic streaming     |
-```
+
+Khi deploy (`app/serve.py`) các endpoint trên nằm dưới tiền tố `/api`.
 
 ## Lệnh hay dùng
 
@@ -240,6 +271,7 @@ backend/
     gemini.py    # Wrapper gọi Gemini (async, streaming, thinking = 0)
     presets.py   # Bối cảnh + từ điển thuật ngữ theo lĩnh vực
     soniox.py    # Temporary key + session config (context/translation_terms)
+    serve.py     # Entrypoint khi deploy: API dưới /api + frontend đã build
     cache.py     # LRU + TTL cache cho câu đã dịch
   pyproject.toml
   .env.example
