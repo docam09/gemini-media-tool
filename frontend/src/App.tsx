@@ -5,10 +5,12 @@ import {
   fetchLanguages,
   fetchModels,
   fetchPresets,
+  fetchSonioxSession,
   translateStream,
   verify,
 } from './api'
 import Phrasebook from './components/Phrasebook'
+import { startLiveInterpreter, type LiveHandle } from './live'
 import { romanizeKorean } from './romanize'
 import {
   cancelSpeech,
@@ -137,6 +139,7 @@ export default function App() {
   const [stats, setStats] = useState<{ latencyMs: number; cached: boolean } | null>(null)
   const [backendStatus, setBackendStatus] = useState<{
     geminiConfigured: boolean
+    sonioxConfigured: boolean
     model: string
   } | null>(null)
   const [models, setModels] = useState<Record<string, ModelInfo>>({})
@@ -150,9 +153,15 @@ export default function App() {
   )
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null)
+  const [liveState, setLiveState] = useState<'stopped' | 'connecting' | 'listening'>('stopped')
+  const [liveDraft, setLiveDraft] = useState<{
+    source: string
+    target: string
+  } | null>(null)
 
   const recognizerRef = useRef<{ stop: () => void } | null>(null)
   const conversationRef = useRef<ConversationHandle | null>(null)
+  const liveRef = useRef<LiveHandle | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const queueRef = useRef<string[]>([])
   const drainingRef = useRef(false)
@@ -165,6 +174,8 @@ export default function App() {
   }, [direction])
 
   const romanization = useMemo(() => romanizeKorean(output), [output])
+  const sonioxAvailable = backendStatus?.sonioxConfigured ?? false
+  const liveOn = liveState !== 'stopped'
 
   // The speech callbacks and the translation queue outlive any single render, so
   // they read the current settings through a ref instead of a stale closure.
@@ -207,7 +218,11 @@ export default function App() {
     fetchHealth()
       .then((h) => {
         if (!cancelled) {
-          setBackendStatus({ geminiConfigured: h.gemini_configured, model: h.model })
+          setBackendStatus({
+            geminiConfigured: h.gemini_configured,
+            sonioxConfigured: h.soniox_configured,
+            model: h.model,
+          })
         }
       })
       .catch(() => {
@@ -235,6 +250,7 @@ export default function App() {
       cancelled = true
       abortRef.current?.abort()
       conversationRef.current?.stop()
+      liveRef.current?.cancel()
     }
   }, [])
 
@@ -401,6 +417,8 @@ export default function App() {
   const stopEverything = useCallback(() => {
     conversationRef.current?.stop()
     conversationRef.current = null
+    liveRef.current?.cancel()
+    liveRef.current = null
     recognizerRef.current?.stop()
     recognizerRef.current = null
     abortRef.current?.abort()
@@ -410,7 +428,81 @@ export default function App() {
     setListening(false)
     setInterim('')
     setBusy(false)
+    setLiveState('stopped')
+    setLiveDraft(null)
   }, [])
+
+  /**
+   * Soniox live mode: one WebSocket transcribes and translates in both
+   * directions at once, so there is nothing to press and no direction to pick —
+   * whoever speaks gets translated for the other person.
+   */
+  const toggleLive = useCallback(() => {
+    if (liveRef.current) {
+      stopEverything()
+      return
+    }
+    setError(null)
+    setLiveDraft(null)
+    warmUpSynthesis()
+
+    liveRef.current = startLiveInterpreter(
+      () => {
+        const settings = settingsRef.current
+        return fetchSonioxSession({
+          preset: presetKey,
+          context: settings.context || undefined,
+          glossary: settings.glossary || undefined,
+        })
+      },
+      {
+        onStateChange: setLiveState,
+        onError: (message) => {
+          setError(message)
+          liveRef.current = null
+          setLiveState('stopped')
+        },
+        onDraft: (draft) => {
+          setLiveDraft({ source: draft.sourceText, target: draft.targetText })
+        },
+        onTurn: (turn) => {
+          setLiveDraft(null)
+          setDirection(turn.sourceLang === 'vi' ? 'vi-to-ko' : 'ko-to-vi')
+          setInput(turn.sourceText)
+          setOutput(turn.targetText)
+          setStats(null)
+          setNote(null)
+          setVerifyResult(null)
+          setHistory((prev) =>
+            [
+              {
+                id: newId(),
+                source: turn.sourceLang,
+                target: turn.targetLang,
+                input: turn.sourceText,
+                output: turn.targetText,
+                romanization: romanizeKorean(turn.targetText),
+                note: null,
+                createdAt: Date.now(),
+                latencyMs: null,
+                cached: false,
+              },
+              ...prev,
+            ].slice(0, MAX_HISTORY),
+          )
+
+          const settings = settingsRef.current
+          if (!settings.autoSpeak || !settings.languages) return
+          // Soniox hears our own speaker otherwise, and would dutifully
+          // translate the translation.
+          liveRef.current?.pause()
+          void speak(turn.targetText, settings.languages[turn.targetLang].bcp47, {
+            rate: settings.speechRate,
+          }).finally(() => liveRef.current?.resume())
+        },
+      },
+    )
+  }, [presetKey, stopEverything])
 
   /** Push-to-talk: one utterance, translated when the user stops. */
   const toggleListening = useCallback(() => {
@@ -724,14 +816,31 @@ export default function App() {
           </section>
 
           <div className="hands-free">
+            {sonioxAvailable && (
+              <button
+                type="button"
+                className={`hands-free__btn ${liveOn ? 'hands-free__btn--on' : ''}`}
+                onClick={toggleLive}
+                disabled={conversing || listening}
+                title="Soniox nghe cả hai người, tự nhận tiếng Việt / tiếng Hàn và dịch ngay giữa câu"
+              >
+                {liveOn
+                  ? liveState === 'connecting'
+                    ? '… Đang kết nối'
+                    : '⏹ Dừng phiên dịch'
+                  : '🎙️ Phiên dịch trực tiếp'}
+              </button>
+            )}
             <button
               type="button"
-              className={`hands-free__btn ${conversing ? 'hands-free__btn--on' : ''}`}
+              className={`hands-free__btn ${conversing ? 'hands-free__btn--on' : ''} ${
+                sonioxAvailable ? 'hands-free__btn--alt' : ''
+              }`}
               onClick={toggleConversation}
-              disabled={!recognitionSupported}
+              disabled={!recognitionSupported || liveOn}
               title={
                 recognitionSupported
-                  ? 'Mic mở liên tục, dịch ngay sau mỗi câu'
+                  ? 'Mic mở liên tục, dịch ngay sau mỗi câu (nhận dạng của trình duyệt + Gemini)'
                   : 'Trình duyệt không hỗ trợ nhận dạng giọng nói (dùng Chrome)'
               }
             >
@@ -747,6 +856,21 @@ export default function App() {
             </label>
           </div>
 
+          {liveOn && (
+            <section className="live">
+              <div className="live__head">
+                <span
+                  className={`live__dot ${liveState === 'listening' ? 'live__dot--on' : ''}`}
+                />
+                {liveState === 'connecting'
+                  ? 'Đang kết nối Soniox…'
+                  : 'Đang nghe — hai người cứ nói tự nhiên, không cần đổi chiều.'}
+              </div>
+              <p className="live__source">{liveDraft?.source || '…'}</p>
+              <p className="live__target">{liveDraft?.target}</p>
+            </section>
+          )}
+
           <form className="pane" onSubmit={handleSubmit}>
             <div className="pane__head">
               <span className="pane__lang">{source === 'vi' ? 'Tiếng Việt' : '한국어'}</span>
@@ -755,7 +879,7 @@ export default function App() {
                   type="button"
                   className={`mic ${listening ? 'mic--on' : ''}`}
                   onClick={toggleListening}
-                  disabled={!recognitionSupported || conversing}
+                  disabled={!recognitionSupported || conversing || liveOn}
                   title={
                     recognitionSupported
                       ? 'Nhấn để nói một câu'
@@ -784,11 +908,13 @@ export default function App() {
             />
             <div className="pane__footer">
               <span className="hint">
-                {conversing
-                  ? '⏺ Mic đang mở — cứ nói, mỗi câu sẽ được dịch ngay.'
-                  : listening
-                    ? '⏺ Đang nghe... nói xong nhấn Dừng.'
-                    : 'Nhấn Dịch để gửi'}
+                {liveOn
+                  ? '⏺ Soniox đang phiên dịch trực tiếp.'
+                  : conversing
+                    ? '⏺ Mic đang mở — cứ nói, mỗi câu sẽ được dịch ngay.'
+                    : listening
+                      ? '⏺ Đang nghe... nói xong nhấn Dừng.'
+                      : 'Nhấn Dịch để gửi'}
               </span>
               <button type="submit" className="primary" disabled={busy || !input.trim()}>
                 {busy ? 'Đang dịch...' : 'Dịch →'}

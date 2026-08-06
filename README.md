@@ -1,21 +1,40 @@
 # Việt ↔ Hàn Realtime Interpreter
 
 Ứng dụng phiên dịch **Tiếng Việt ↔ 한국어** theo thời gian thực, chạy local trên
-máy bạn, làm cho các tình huống đi công tác Hàn Quốc. Backend gọi Google Gemini
-cho phần dịch, frontend dùng Web Speech API của Chrome cho nhận dạng giọng nói
-(STT) và đọc kết quả (TTS) — không cần trả thêm phí cho dịch vụ TTS/STT.
+máy bạn, làm cho các tình huống đi công tác Hàn Quốc.
+
+Hai chế độ nói, dùng được độc lập:
+
+- **Phiên dịch trực tiếp (Soniox)** — mic streaming qua WebSocket, nhận dạng và
+  dịch **hai chiều trong cùng một kết nối**: Soniox tự biết ai đang nói tiếng
+  Việt / tiếng Hàn nên không phải bấm đổi chiều, và bản dịch hiện ra ngay giữa
+  câu. Chạy được trên iPhone/Safari. Cần `SONIOX_API_KEY`.
+- **Hội thoại rảnh tay (Web Speech + Gemini)** — dự phòng khi không có key
+  Soniox; chỉ chạy tốt trên Chrome/Edge.
+
+Gõ tay và nút kiểm tra dịch ngược luôn dùng Gemini.
 
 ```
-┌────────────────────┐  SSE  ┌──────────────────────┐       ┌──────────────────┐
-│  Chrome (frontend) │ ───── │  FastAPI (backend)   │ ───── │  Gemini          │
-│  Web Speech STT/TTS│       │  stream + cache      │       │  Flash-Lite/Flash│
-│  Romanization local│       │  presets + glossary  │       │  thinking = 0    │
+┌────────────────────┐  WS   ┌──────────────────┐
+│  Trình duyệt       │ ───── │  Soniox stt-rt-v5│  nói: STT + dịch 2 chiều
+│  mic → WebSocket   │       │  two_way vi↔ko   │
+│  Romanization local│       └──────────────────┘
+│                    │  SSE  ┌──────────────────────┐       ┌──────────────────┐
+│  gõ tay / kiểm tra │ ───── │  FastAPI (backend)   │ ───── │  Gemini          │
+│                    │       │  stream + cache      │       │  Flash-Lite/Flash│
+│                    │       │  presets + glossary  │       │  thinking = 0    │
 └────────────────────┘       └──────────────────────┘       └──────────────────┘
         :5173                          :8000
 ```
 
+Key Soniox **chỉ nằm ở backend**. Trình duyệt gọi `POST /soniox/session` để lấy
+temporary key (sống 2 phút) kèm session config đã nạp thuật ngữ theo bối cảnh,
+rồi tự mở WebSocket tới Soniox bằng key tạm đó.
+
 ## Tính năng
 
+- **Phiên dịch trực tiếp hai chiều**: hai người cứ nói tự nhiên, không bấm gì;
+  thuật ngữ bán dẫn được đẩy vào `context.terms` / `translation_terms` của Soniox
 - **Hội thoại rảnh tay**: mic mở liên tục, mỗi câu nói xong là dịch ngay, tuỳ
   chọn tự đảo chiều sau mỗi lượt để hai người nói qua lại không cần bấm gì
 - **Dịch theo dòng (streaming)**: chữ hiện sau ~0,3s thay vì chờ hết câu
@@ -49,7 +68,10 @@ request, và backend hâm nóng kết nối ngay khi khởi động.
 - Python 3.11+ và [Poetry](https://python-poetry.org/)
 - Node.js 20+ và npm
 - Một Gemini API key (lấy miễn phí: <https://aistudio.google.com/apikey>)
-- **Chrome / Edge** (Firefox/Safari không hỗ trợ Web Speech Recognition đầy đủ)
+- Một Soniox API key cho chế độ phiên dịch trực tiếp (<https://console.soniox.com>);
+  không có key thì app vẫn chạy, chỉ ẩn nút phiên dịch trực tiếp
+- **Chrome / Edge** cho chế độ hội thoại rảnh tay (Web Speech). Chế độ Soniox
+  chạy được cả trên Safari/iOS
 
 ## Cài đặt
 
@@ -119,16 +141,19 @@ Kết quả sẽ chỉ rõ giai đoạn nào hỏng:
 1. Chọn **Bối cảnh** đúng với việc đang làm (vd. *Bán dẫn / LED* khi họp kỹ
    thuật). Đây là thứ ảnh hưởng nhiều nhất tới độ chính xác thuật ngữ.
 2. Chọn hướng dịch và phong cách (**Lịch sự** cho môi trường công việc).
-3. Bấm **♾️ Hội thoại rảnh tay** rồi cứ nói bình thường — mỗi câu dừng lại là
+3. Bấm **🎙️ Phiên dịch trực tiếp** (khi đã có key Soniox) rồi đặt điện thoại giữa
+   hai người. Không cần chọn hướng: ai nói tiếng gì cũng được dịch sang tiếng còn
+   lại, chữ hiện dần ngay khi đang nói. Mic tự tạm dừng lúc máy đọc bản dịch.
+4. Không có key Soniox thì bấm **♾️ Hội thoại rảnh tay** rồi cứ nói bình thường — mỗi câu dừng lại là
    dịch và đọc ngay. Bật *Tự đổi chiều sau mỗi lượt* khi nói qua lại với người
    Hàn: sau khi máy đọc xong bản dịch, mic tự chuyển sang nghe tiếng Hàn.
    Mic tự tắt trong lúc máy đang đọc nên không nghe lại chính nó.
-4. Cần một câu lẻ thì dùng **🎤 Nói** (bấm để nói, bấm lại để dịch), hoặc gõ tay.
-5. Trước khi nói câu quan trọng (số liệu, hợp đồng, y tế), bấm **✓ Kiểm tra** —
+5. Cần một câu lẻ thì dùng **🎤 Nói** (bấm để nói, bấm lại để dịch), hoặc gõ tay.
+6. Trước khi nói câu quan trọng (số liệu, hợp đồng, y tế), bấm **✓ Kiểm tra** —
    câu dịch sẽ được dịch ngược bằng model mạnh nhất để bạn soát nghĩa.
-6. Tab **Sổ tay (offline)** có sẵn các câu dùng ngay, kèm phiên âm; bấm 🔊 để
+7. Tab **Sổ tay (offline)** có sẵn các câu dùng ngay, kèm phiên âm; bấm 🔊 để
    phát cho người đối diện nghe, hoặc ✎ để mở trong trình dịch và sửa.
-7. Thêm thuật ngữ riêng của công ty ở **Nâng cao → Từ điển riêng**; các cặp từ
+8. Thêm thuật ngữ riêng của công ty ở **Nâng cao → Từ điển riêng**; các cặp từ
    này là bắt buộc, model không được dịch khác.
 
 ### Cài như app trên điện thoại
@@ -144,12 +169,24 @@ Backend đọc các biến môi trường sau (từ `backend/.env` hoặc shell)
 | ---------------- | ----------------------- | ----------------------------------------- |
 | `GEMINI_API_KEY` | _(bắt buộc)_            | Key từ Google AI Studio                   |
 | `GEMINI_MODEL`   | `gemini-2.5-flash-lite` | Phải là một model trong `GET /models`     |
+| `SONIOX_API_KEY` | _(tùy chọn)_            | Bật chế độ phiên dịch trực tiếp          |
+| `SONIOX_MODEL`   | `stt-rt-v5`             | Model realtime của Soniox                 |
+
+Key Soniox không bao giờ được gửi ra trình duyệt: backend dùng nó để tạo
+temporary key (`expires_in_seconds=120`, `max_session_duration_seconds=3600`)
+cho từng phiên thu âm.
 
 ## Kiểm tra nhanh
 
 ```bash
 curl http://localhost:8000/healthz
-# {"status":"ok","gemini_configured":true,"model":"gemini-2.5-flash-lite","cache":{...}}
+# {"status":"ok","gemini_configured":true,"soniox_configured":true,...}
+
+# Temporary key cho mic streaming (không chứa key thật)
+curl -X POST http://localhost:8000/soniox/session \
+  -H 'Content-Type: application/json' \
+  -d '{"preset":"semiconductor"}'
+# {"api_key":"<tạm, 120s>","websocket_url":"wss://stt-rt.soniox.com/...","config":{...}}
 
 curl -X POST http://localhost:8000/translate \
   -H 'Content-Type: application/json' \
@@ -179,6 +216,7 @@ curl -X POST http://localhost:8000/verify \
 | `POST /translate`        | Dịch, trả về một lần                                 |
 | `POST /translate/stream` | Dịch, stream từng đoạn qua SSE                       |
 | `POST /verify`           | Dịch ngược + ghi chú, để soát câu quan trọng         |
+| `POST /soniox/session`   | Temporary key + session config cho mic streaming     |
 ```
 
 ## Lệnh hay dùng
@@ -201,6 +239,7 @@ backend/
     main.py      # FastAPI app + endpoints (buffered + SSE streaming)
     gemini.py    # Wrapper gọi Gemini (async, streaming, thinking = 0)
     presets.py   # Bối cảnh + từ điển thuật ngữ theo lĩnh vực
+    soniox.py    # Temporary key + session config (context/translation_terms)
     cache.py     # LRU + TTL cache cho câu đã dịch
   pyproject.toml
   .env.example
@@ -213,6 +252,7 @@ frontend/
     components/
       Phrasebook.tsx     # Sổ tay offline
     api.ts               # Gọi backend (có SSE + abort)
+    live.ts              # Soniox realtime: mic → WebSocket, gộp token thành lượt
     speech.ts            # Web Speech API wrappers (STT + TTS)
     romanize.ts          # Revised Romanization tính tại client
     romanize.test.ts

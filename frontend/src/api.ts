@@ -1,3 +1,4 @@
+import type { SonioxSession } from './live'
 import type {
   LanguageCode,
   LanguageInfo,
@@ -65,6 +66,7 @@ export async function fetchLanguages(): Promise<Record<LanguageCode, LanguageInf
 export async function fetchHealth(): Promise<{
   status: string
   gemini_configured: boolean
+  soniox_configured: boolean
   model: string
 }> {
   const res = await fetch(`${API_BASE}/healthz`)
@@ -182,6 +184,29 @@ export async function verify(params: {
   })
   if (!res.ok) throw await toError(res)
   return (await res.json()) as VerifyResponse
+}
+
+/**
+ * Ask the backend for a short-lived Soniox key plus the session config to use
+ * with it. Called once per recording session, and again on reconnects, because
+ * the key expires within a couple of minutes.
+ */
+export async function fetchSonioxSession(params: {
+  preset?: string
+  context?: string
+  glossary?: string
+}): Promise<SonioxSession> {
+  const res = await fetch(`${API_BASE}/soniox/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      preset: params.preset ?? null,
+      context: params.context ?? null,
+      glossary: params.glossary ?? null,
+    }),
+  })
+  if (!res.ok) throw await toError(res)
+  return (await res.json()) as SonioxSession
 }
 
 export async function fetchDiag(): Promise<{

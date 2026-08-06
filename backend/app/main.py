@@ -10,6 +10,7 @@ HTTP surface:
 * ``POST /translate``        — translate, buffered
 * ``POST /translate/stream`` — translate, streamed as Server-Sent Events
 * ``POST /verify``           — back-translation check for important sentences
+* ``POST /soniox/session``   — short-lived key + config for live speech translation
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app import soniox
 from app.cache import TranslationCache
 from app.gemini import GeminiTranslator, TranslationError, Turn, clean_translation
 from app.presets import DEFAULT_PRESET, PRESETS
@@ -137,6 +139,19 @@ class PresetsResponse(BaseModel):
     presets: dict[str, PresetInfo]
 
 
+class SonioxSessionRequest(BaseModel):
+    preset: str | None = None
+    context: str | None = Field(default=None, max_length=2000)
+    glossary: str | None = Field(default=None, max_length=4000)
+
+
+class SonioxSessionResponse(BaseModel):
+    api_key: str
+    websocket_url: str
+    expires_in_seconds: int
+    config: dict[str, object]
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Warm the Gemini connection so the first translation isn't the slow one."""
@@ -242,9 +257,38 @@ def healthz() -> dict[str, object]:
     return {
         "status": "ok",
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
+        "soniox_configured": soniox.is_configured(),
         "model": _default_model(),
         "cache": _cache.stats(),
     }
+
+
+@app.post("/soniox/session", response_model=SonioxSessionResponse)
+async def soniox_session(req: SonioxSessionRequest) -> SonioxSessionResponse:
+    """Mint a temporary Soniox key and the session config to use it with.
+
+    The long-lived key stays here. The config is built server-side so the
+    glossary the browser records against always matches the presets this
+    backend serves.
+    """
+    try:
+        key = await soniox.create_temporary_key(client_reference_id="vn-kr-interpreter")
+    except soniox.SonioxNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except soniox.SonioxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    config = soniox.build_session_config(
+        preset=req.preset,
+        context=req.context,
+        glossary=req.glossary,
+    )
+    return SonioxSessionResponse(
+        api_key=key,
+        websocket_url=soniox.WEBSOCKET_URL,
+        expires_in_seconds=soniox.KEY_TTL_SECONDS,
+        config=config,
+    )
 
 
 @app.get("/models", response_model=ModelsResponse)
