@@ -1,0 +1,20 @@
+{
+  "name": "Việt ↔ Hàn — Phiên dịch thời gian thực",
+  "short_name": "Việt ↔ Hàn",
+  "description": "Phiên dịch Việt–Hàn theo thời gian thực, có sổ tay câu dùng offline.",
+  "lang": "vi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,28 +1,48 @@
-# Việt ↔ Hàn Realtime Translator
+# Việt ↔ Hàn Realtime Interpreter
 
-Ứng dụng dịch hội thoại hằng ngày song ngữ **Tiếng Việt ↔ 한국어**, chạy local
-trên máy bạn. Backend gọi Google Gemini cho phần dịch, frontend dùng Web Speech
-API của Chrome cho nhận dạng giọng nói (STT) và đọc kết quả (TTS) — không cần
-trả thêm phí cho dịch vụ TTS/STT.
+Ứng dụng phiên dịch **Tiếng Việt ↔ 한국어** theo thời gian thực, chạy local trên
+máy bạn, làm cho các tình huống đi công tác Hàn Quốc. Backend gọi Google Gemini
+cho phần dịch, frontend dùng Web Speech API của Chrome cho nhận dạng giọng nói
+(STT) và đọc kết quả (TTS) — không cần trả thêm phí cho dịch vụ TTS/STT.
 
 ```
-┌────────────────────┐       ┌──────────────────────┐       ┌────────────┐
-│  Chrome (frontend) │ ───── │  FastAPI (backend)   │ ───── │  Gemini    │
-│  Web Speech STT/TTS│       │  /translate proxy    │       │  2.5 Flash │
-└────────────────────┘       └──────────────────────┘       └────────────┘
+┌────────────────────┐  SSE  ┌──────────────────────┐       ┌──────────────────┐
+│  Chrome (frontend) │ ───── │  FastAPI (backend)   │ ───── │  Gemini          │
+│  Web Speech STT/TTS│       │  stream + cache      │       │  Flash-Lite/Flash│
+│  Romanization local│       │  presets + glossary  │       │  thinking = 0    │
+└────────────────────┘       └──────────────────────┘       └──────────────────┘
         :5173                          :8000
 ```
 
 ## Tính năng
 
-- Dịch hai chiều VI ↔ KO theo thời gian thực
-- Nhập bằng giọng nói (mic) hoặc gõ text
-- Đọc to kết quả bằng giọng bản ngữ của hệ điều hành
-- Hiển thị phiên âm (Revised Romanization) khi dịch sang tiếng Hàn — hữu ích
-  khi học
-- Chuyển nhanh giữa phong cách **Thân mật** và **Lịch sự**
-- Lịch sử 30 câu gần nhất, có nút phát lại
-- Chạy hoàn toàn local trên máy bạn (chỉ gọi Gemini ra ngoài)
+- **Hội thoại rảnh tay**: mic mở liên tục, mỗi câu nói xong là dịch ngay, tuỳ
+  chọn tự đảo chiều sau mỗi lượt để hai người nói qua lại không cần bấm gì
+- **Dịch theo dòng (streaming)**: chữ hiện sau ~0,3s thay vì chờ hết câu
+- Bối cảnh sẵn có: bán dẫn/LED, họp công tác, tiệc tối, đi lại, y tế — mỗi
+  bối cảnh nạp kèm từ điển thuật ngữ tương ứng
+- Nhớ 4 lượt gần nhất làm ngữ cảnh, nên đại từ và câu hỏi tiếp nối dịch đúng
+- Chọn cân bằng tốc độ/độ chính xác qua 4 model, kèm số ms thực đo hiển thị
+- **Kiểm tra ngược**: dịch câu vừa ra trở lại ngôn ngữ gốc bằng model mạnh nhất
+  để soát nghĩa trước khi nói câu quan trọng
+- **Sổ tay offline**: ~55 câu công tác/khẩn cấp, có phiên âm, chạy không cần mạng
+- Phiên âm Revised Romanization tính ngay trong trình duyệt (không tốn latency)
+- Cài được như app (PWA): mở được cả khi máy bay / hết data roaming
+- Lưu lịch sử, bối cảnh, từ điển, tốc độ đọc trong trình duyệt
+
+## Tối ưu tốc độ
+
+Số đo p50 cho một câu nói, từ backend này:
+
+| Thay đổi                                        | Trước    | Sau      |
+| ----------------------------------------------- | -------- | -------- |
+| `thinking_budget=0` (gemini-2.5-flash)          | 2 848 ms | 1 061 ms |
+| Bỏ JSON + phiên âm, chuyển sang stream text     | 1 150 ms | 570 ms   |
+| Chữ đầu tiên hiện trên màn hình (streaming)     | 1 150 ms | ~300 ms  |
+| Câu đã dịch trước đó (cache trong tiến trình)   | 570 ms   | 0 ms     |
+
+Ngoài ra: client Gemini được dùng lại (giữ ấm kết nối TLS) thay vì tạo mới mỗi
+request, và backend hâm nóng kết nối ngay khi khởi động.
 
 ## Yêu cầu
 
@@ -96,34 +116,69 @@ Kết quả sẽ chỉ rõ giai đoạn nào hỏng:
 
 ## Sử dụng
 
-1. Chọn hướng dịch (VI → KO hoặc KO → VI) bằng các nút phía trên.
-2. Nhấn **🎤 Nói** rồi nói vào mic — câu sẽ tự động được dịch khi bạn dừng nói.
-   Hoặc gõ trực tiếp và bấm **Dịch →**.
-3. Bật **Tự đọc kết quả** để nghe phát âm câu dịch ngay.
-4. Khi dịch sang tiếng Hàn, dòng phiên âm (vd. `annyeong, jal jinae?`) sẽ hiện
-   bên dưới để bạn tập đọc theo.
-5. Bấm nút **↕** để đảo chiều và dùng câu vừa dịch làm input mới — tiện cho
-   hội thoại qua lại.
+1. Chọn **Bối cảnh** đúng với việc đang làm (vd. *Bán dẫn / LED* khi họp kỹ
+   thuật). Đây là thứ ảnh hưởng nhiều nhất tới độ chính xác thuật ngữ.
+2. Chọn hướng dịch và phong cách (**Lịch sự** cho môi trường công việc).
+3. Bấm **♾️ Hội thoại rảnh tay** rồi cứ nói bình thường — mỗi câu dừng lại là
+   dịch và đọc ngay. Bật *Tự đổi chiều sau mỗi lượt* khi nói qua lại với người
+   Hàn: sau khi máy đọc xong bản dịch, mic tự chuyển sang nghe tiếng Hàn.
+   Mic tự tắt trong lúc máy đang đọc nên không nghe lại chính nó.
+4. Cần một câu lẻ thì dùng **🎤 Nói** (bấm để nói, bấm lại để dịch), hoặc gõ tay.
+5. Trước khi nói câu quan trọng (số liệu, hợp đồng, y tế), bấm **✓ Kiểm tra** —
+   câu dịch sẽ được dịch ngược bằng model mạnh nhất để bạn soát nghĩa.
+6. Tab **Sổ tay (offline)** có sẵn các câu dùng ngay, kèm phiên âm; bấm 🔊 để
+   phát cho người đối diện nghe, hoặc ✎ để mở trong trình dịch và sửa.
+7. Thêm thuật ngữ riêng của công ty ở **Nâng cao → Từ điển riêng**; các cặp từ
+   này là bắt buộc, model không được dịch khác.
+
+### Cài như app trên điện thoại
+
+Build rồi mở qua HTTPS (hoặc `localhost`), sau đó *Add to Home screen*. Vỏ app
+được service worker cache lại nên tab **Sổ tay** vẫn mở được khi mất mạng.
 
 ## Cấu hình
 
 Backend đọc các biến môi trường sau (từ `backend/.env` hoặc shell):
 
-| Biến             | Mặc định           | Mô tả                              |
-| ---------------- | ------------------ | ---------------------------------- |
-| `GEMINI_API_KEY` | _(bắt buộc)_       | Key từ Google AI Studio            |
-| `GEMINI_MODEL`   | `gemini-2.5-flash` | Có thể đổi sang `gemini-2.5-pro`…  |
+| Biến             | Mặc định                | Mô tả                                     |
+| ---------------- | ----------------------- | ----------------------------------------- |
+| `GEMINI_API_KEY` | _(bắt buộc)_            | Key từ Google AI Studio                   |
+| `GEMINI_MODEL`   | `gemini-2.5-flash-lite` | Phải là một model trong `GET /models`     |
 
 ## Kiểm tra nhanh
 
 ```bash
 curl http://localhost:8000/healthz
-# {"status":"ok","gemini_configured":true,"model":"gemini-2.5-flash"}
+# {"status":"ok","gemini_configured":true,"model":"gemini-2.5-flash-lite","cache":{...}}
 
 curl -X POST http://localhost:8000/translate \
   -H 'Content-Type: application/json' \
   -d '{"text":"Xin chào","source":"vi","target":"ko","style":"casual"}'
-# {"translation":"안녕","romanization":"annyeong","note":null,...}
+# {"translation":"안녕","model":"gemini-2.5-flash-lite","cached":false,"latency_ms":412,...}
+
+# Streaming (SSE) — deltas rồi tới event done
+curl -N -X POST http://localhost:8000/translate/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Tỷ lệ lỗi lô này là bao nhiêu?","source":"vi","target":"ko","style":"formal"}'
+
+# Kiểm tra ngược một câu đã dịch
+curl -X POST http://localhost:8000/verify \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Tỷ lệ lỗi là 2,3 phần trăm.","translation":"불량률은 2.3퍼센트입니다.","source":"vi","target":"ko"}'
+```
+
+## API
+
+| Endpoint                 | Mô tả                                                |
+| ------------------------ | ---------------------------------------------------- |
+| `GET  /healthz`          | Trạng thái + đã có API key chưa + thống kê cache     |
+| `GET  /diag`             | Gọi thật lên Gemini để khoanh vùng lỗi               |
+| `GET  /languages`        | Mã BCP-47 cho Web Speech API                         |
+| `GET  /models`           | Các model được phép chọn, kèm latency đo thực tế     |
+| `GET  /presets`          | Bối cảnh + từ điển thuật ngữ theo lĩnh vực           |
+| `POST /translate`        | Dịch, trả về một lần                                 |
+| `POST /translate/stream` | Dịch, stream từng đoạn qua SSE                       |
+| `POST /verify`           | Dịch ngược + ghi chú, để soát câu quan trọng         |
 ```
 
 ## Lệnh hay dùng
@@ -134,6 +189,7 @@ curl -X POST http://localhost:8000/translate \
 
 # Frontend
 (cd frontend && npm run lint)
+(cd frontend && npm run test)    # kiểm tra bộ phiên âm Hangul
 (cd frontend && npm run build)   # gồm cả tsc -b
 ```
 
@@ -142,15 +198,25 @@ curl -X POST http://localhost:8000/translate \
 ```
 backend/
   app/
-    main.py     # FastAPI app + endpoints
-    gemini.py   # Wrapper gọi Gemini, parse JSON response
+    main.py      # FastAPI app + endpoints (buffered + SSE streaming)
+    gemini.py    # Wrapper gọi Gemini (async, streaming, thinking = 0)
+    presets.py   # Bối cảnh + từ điển thuật ngữ theo lĩnh vực
+    cache.py     # LRU + TTL cache cho câu đã dịch
   pyproject.toml
   .env.example
 frontend/
+  public/
+    manifest.webmanifest
+    sw.js                # Cache vỏ app để dùng offline
   src/
-    App.tsx     # UI chính
-    api.ts      # Gọi backend
-    speech.ts   # Web Speech API wrappers (STT + TTS)
+    App.tsx              # UI chính, hàng đợi dịch, chế độ hội thoại
+    components/
+      Phrasebook.tsx     # Sổ tay offline
+    api.ts               # Gọi backend (có SSE + abort)
+    speech.ts            # Web Speech API wrappers (STT + TTS)
+    romanize.ts          # Revised Romanization tính tại client
+    romanize.test.ts
+    phrasebook.ts        # Nội dung sổ tay
     types.ts
     styles.css
   vite.config.ts

@@ -182,6 +182,145 @@ export function listenOnce(lang: string, callbacks: RecognitionCallbacks): {
   }
 }
 
+export interface ConversationCallbacks {
+  /** Fired continuously with the partial transcript of the current utterance. */
+  onInterim?: (transcript: string) => void
+  /** Fired once per completed utterance, while the session stays open. */
+  onSegment: (transcript: string) => void
+  onError?: (message: string) => void
+  onEnd?: () => void
+  onStart?: () => void
+}
+
+export interface ConversationHandle {
+  stop: () => void
+  /** Stop listening while our own text-to-speech plays, to avoid a feedback loop. */
+  pause: () => void
+  resume: () => void
+  setLang: (lang: string) => void
+}
+
+/**
+ * Open-mic conversation mode.
+ *
+ * `listenOnce` only translates after the user presses stop, which costs a beat
+ * on every single turn. Here each utterance is dispatched as soon as Chrome
+ * marks it final, so translation of sentence N overlaps with the speaker saying
+ * sentence N+1. Chrome also ends recognition on its own after a pause, so the
+ * session restarts itself until the caller stops it.
+ */
+export function startConversation(
+  lang: string,
+  callbacks: ConversationCallbacks,
+): ConversationHandle | null {
+  if (!isRecognitionSupported()) return null
+
+  let currentLang = lang
+  let recognizer: SpeechRecognitionLike | null = null
+  let stopped = false
+  let paused = false
+  let startedOnce = false
+  /** Backoff for the restart loop, so a hard failure can't spin the CPU. */
+  let restartDelay = 150
+
+  const attach = (rec: SpeechRecognitionLike): void => {
+    rec.onstart = () => {
+      restartDelay = 150
+      if (!startedOnce) {
+        startedOnce = true
+        callbacks.onStart?.()
+      }
+    }
+
+    rec.onresult = (event) => {
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i]
+        const transcript = (result[0]?.transcript ?? '').trim()
+        if (!transcript) continue
+        if (result.isFinal) {
+          callbacks.onSegment(transcript)
+        } else {
+          interim += transcript
+        }
+      }
+      callbacks.onInterim?.(interim)
+    }
+
+    rec.onerror = (event) => {
+      // 'no-speech' is expected during natural pauses and 'aborted' is us.
+      if (event.error === 'aborted' || event.error === 'no-speech') return
+      if (event.error === 'network') restartDelay = 1500
+      callbacks.onError?.(friendlyError(event.error))
+    }
+
+    rec.onend = () => {
+      recognizer = null
+      if (stopped) {
+        callbacks.onEnd?.()
+        return
+      }
+      window.setTimeout(spawn, paused ? 400 : restartDelay)
+      restartDelay = Math.min(restartDelay * 2, 4000)
+    }
+  }
+
+  function spawn(): void {
+    if (stopped || paused || recognizer) return
+    const rec = createRecognizer(currentLang)
+    if (!rec) {
+      callbacks.onError?.('Trình duyệt không hỗ trợ nhận dạng giọng nói.')
+      return
+    }
+    attach(rec)
+    recognizer = rec
+    try {
+      rec.start()
+    } catch (err) {
+      recognizer = null
+      callbacks.onError?.(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const abort = (): void => {
+    const rec = recognizer
+    recognizer = null
+    if (!rec) return
+    try {
+      rec.abort()
+    } catch {
+      // already gone
+    }
+  }
+
+  spawn()
+
+  return {
+    stop: () => {
+      if (stopped) return
+      stopped = true
+      abort()
+      callbacks.onEnd?.()
+    },
+    pause: () => {
+      if (paused) return
+      paused = true
+      abort()
+    },
+    resume: () => {
+      if (!paused) return
+      paused = false
+      spawn()
+    },
+    setLang: (next: string) => {
+      if (next === currentLang) return
+      currentLang = next
+      abort()
+      if (!paused && !stopped) spawn()
+    },
+  }
+}
+
 let _voicesCache: SpeechSynthesisVoice[] | null = null
 
 function loadVoices(): Promise<SpeechSynthesisVoice[]> {
@@ -218,17 +357,53 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesi
   return voices.find((v) => v.lang.startsWith(prefix)) ?? null
 }
 
-export async function speak(text: string, lang: string): Promise<void> {
+/**
+ * Speak `text`, resolving when playback finishes.
+ *
+ * Awaiting completion is what lets conversation mode hold the microphone shut
+ * while our own audio plays, instead of transcribing the translation back.
+ */
+export async function speak(
+  text: string,
+  lang: string,
+  options: { rate?: number } = {},
+): Promise<void> {
   if (!text.trim() || !isSynthesisSupported()) return
   const voices = _voicesCache ?? (await loadVoices())
   const voice = pickVoice(voices, lang)
   const utter = new SpeechSynthesisUtterance(text)
   utter.lang = lang
   if (voice) utter.voice = voice
-  utter.rate = 1
+  utter.rate = options.rate ?? 1
   utter.pitch = 1
-  // Cancel any in-progress speech so rapid translations don't pile up.
-  window.speechSynthesis.cancel()
+
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    utter.onend = finish
+    utter.onerror = finish
+    // Chrome occasionally drops `onend`; bound the wait on the utterance length
+    // so the microphone is never left paused forever.
+    window.setTimeout(finish, 2000 + text.length * 120)
+    // Cancel any in-progress speech so rapid translations don't pile up.
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utter)
+  })
+}
+
+/**
+ * Nudge the synthesis engine so the first real utterance isn't delayed by voice
+ * loading. Must be called from a user gesture on iOS.
+ */
+export function warmUpSynthesis(): void {
+  if (!isSynthesisSupported()) return
+  void loadVoices()
+  const utter = new SpeechSynthesisUtterance('')
+  utter.volume = 0
   window.speechSynthesis.speak(utter)
 }
 
