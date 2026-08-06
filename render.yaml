@@ -1,0 +1,17 @@
+# Deploy to Render: New → Blueprint → pick this repo. The keys are marked
+# sync:false so Render asks for them instead of storing them in git.
+services:
+  - type: web
+    name: vn-kr-interpreter
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SONIOX_API_KEY
+        sync: false
+      # Shared password for the whole site. Leave unset to make it public —
+      # but then anyone with the URL spends your API quota.
+      - key: APP_PASSWORD
+        sync: false

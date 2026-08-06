@@ -1,4 +1,6 @@
 .env
+# Built frontend, copied in by the Dockerfile / deploy build
+static/
 .venv/
 __pycache__/
 *.pyc
