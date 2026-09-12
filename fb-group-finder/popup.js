@@ -1,15 +1,21 @@
 const $ = (id) => document.getElementById(id);
+/** @type {HTMLTextAreaElement} */
+const queryInput = document.querySelector("#query");
+/** @type {HTMLInputElement} */
+const maxPostsInput = document.querySelector("#maxPosts");
+/** @type {HTMLButtonElement} */
+const runButton = document.querySelector("#run");
 let lastResults = [];
 
 $("openOptions").onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
 
 chrome.storage.local.get(["lastQuery", "maxPosts"]).then((s) => {
-  if (s.lastQuery) $("query").value = s.lastQuery;
-  if (s.maxPosts) $("maxPosts").value = s.maxPosts;
+  if (s.lastQuery) queryInput.value = s.lastQuery;
+  if (s.maxPosts) maxPostsInput.value = s.maxPosts;
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "SCAN_PROGRESS") $("status").textContent = `Đang cuộn đọc bài... ${msg.scanned} bài (lần cuộn ${msg.scroll})`;
+  if (msg?.type === "SCAN_PROGRESS") $("status").textContent = `Đã đọc ${msg.scanned} bài · ${msg.candidates || 0} khung bài · cuộn ${msg.scroll}`;
 });
 
 async function getTab() {
@@ -48,9 +54,9 @@ function render(results) {
   }
 }
 
-$("run").onclick = async () => {
-  const query = $("query").value.trim();
-  const maxPosts = Number($("maxPosts").value) || 60;
+runButton.onclick = async () => {
+  const query = queryInput.value.trim();
+  const maxPosts = Math.min(300, Math.max(10, Math.floor(Number(maxPostsInput.value) || 60)));
   $("error").textContent = "";
   $("results").innerHTML = "";
   $("tools").style.display = "none";
@@ -62,15 +68,19 @@ $("run").onclick = async () => {
     $("error").textContent = "Hãy mở một nhóm Facebook (www.facebook.com/groups/...) rồi bấm lại.";
     return;
   }
-  $("run").disabled = true;
+  runButton.disabled = true;
   try {
     const ping = await ensureContent(tab.id);
-    if (!ping?.isGroup) $("status").textContent = "Lưu ý: tab này không phải trang nhóm, vẫn thử quét feed hiện tại...";
-    else $("status").textContent = "Bắt đầu quét...";
+    if (!ping?.isGroup) throw new Error("Hãy mở trang một nhóm Facebook rồi quét lại.");
+    $("status").textContent = "Bắt đầu quét...";
 
-    const scan = await chrome.tabs.sendMessage(tab.id, { type: "SCAN", opts: { maxPosts, maxScrolls: Math.ceil(maxPosts / 2) } });
+    const scan = await chrome.tabs.sendMessage(tab.id, { type: "SCAN", opts: { maxPosts, maxScrolls: Math.max(30, Math.min(120, maxPosts)) } });
     if (!scan?.ok) throw new Error(scan?.error || "Quét thất bại");
-    if (!scan.posts.length) throw new Error("Không đọc được bài nào. Cuộn trang xuống một chút rồi thử lại.");
+    if (!scan.posts.length) {
+      const d = scan.diagnostics;
+      const detail = d ? ` Nhận diện ${d.candidates} khung bài; ${d.missingLinks} thiếu link, ${d.missingText} thiếu nội dung; đã cuộn ${d.scrolls} lần.` : "";
+      throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Hãy tải lại tab Facebook sau khi cập nhật extension. Nếu vẫn lỗi, gửi ảnh thông báo này và ảnh một bài đang hiển thị trong nhóm.`);
+    }
     $("status").textContent = `Đã đọc ${scan.posts.length} bài. Đang nhờ Gemini lọc...`;
 
     const filt = await chrome.runtime.sendMessage({ type: "FILTER", query, posts: scan.posts });
@@ -83,7 +93,7 @@ $("run").onclick = async () => {
     $("error").textContent = e.message || String(e);
     $("status").textContent = "";
   } finally {
-    $("run").disabled = false;
+    runButton.disabled = false;
   }
 };
 

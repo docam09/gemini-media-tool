@@ -7,7 +7,7 @@ Chạy hoàn toàn trên tab Facebook bạn đang đăng nhập, không lưu m�
 ## Cài đặt
 
 1. Tải/clone repo này về máy.
-2. Chrome → `chrome://extensions` → bật **Developer mode** → **Load unpacked** → chọn thư mục repo.
+2. Chrome → `chrome://extensions` → bật **Developer mode** → **Load unpacked** → chọn thư mục `fb-group-finder` chứa `manifest.json` (không chọn thư mục gốc của `gemini-media-tool`).
 3. Bấm icon extension → **Cài đặt** → dán Gemini API key (lấy tại https://aistudio.google.com/apikey) → Lưu.
 
 ## Dùng
@@ -18,6 +18,33 @@ Chạy hoàn toàn trên tab Facebook bạn đang đăng nhập, không lưu m�
 4. Có thể **Copy kết quả** hoặc **Tải CSV**.
 
 Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm trong nhóm) trước rồi mới quét để tập trung vào bài liên quan.
+
+## Cập nhật từ bản 0.1.0
+
+1. Giải nén bản mới hoặc cập nhật mã nguồn.
+2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
+3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
+4. Kiểm tra phiên bản **0.1.1**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+
+Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
+
+Nếu vẫn không có kết quả, thông báo sẽ ghi số khung bài nhận diện, khung thiếu link/nội dung và số lần cuộn. Gửi ảnh thông báo cùng ảnh một bài trong nhóm (có thể che thông tin riêng tư) để kiểm tra cấu trúc Facebook đang hiển thị. Các số khung là mức cao nhất quan sát trong một lượt, không phải tổng số bài trong nhóm.
+
+Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không đọc nội dung nằm hoàn toàn trong ảnh, không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được và yêu cầu tìm kiếm được gửi tới Gemini để lọc.
+
+## Kiểm tra mã nguồn
+
+Không cần build hoặc cài npm để sử dụng extension. Bộ kiểm tra dành cho phát triển dùng Node.js 20+:
+
+```sh
+cd fb-group-finder
+npm install
+npm run lint
+npm run typecheck
+npm test
+```
+
+Kiểm thử dùng DOM giả lập, bao gồm feed tải chậm, bài không có `role="article"`, link bài, bình luận, cuộn từng màn hình và giới hạn quét. Đây không phải xác nhận tương thích với mọi giao diện Facebook; vẫn cần kiểm tra trên nhóm đang đăng nhập.
 
 ## Lưu ý
 

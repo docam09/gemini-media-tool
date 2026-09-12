@@ -1,0 +1,17 @@
+{
+  "name": "fb-group-finder",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.0.287",
+    "eslint": "9.39.1",
+    "globals": "16.5.0",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3"
+  }
+}
