@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FB Group Finder",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Quét bài trong nhóm Facebook đang mở, dùng Gemini lọc theo yêu cầu và trả về kết quả kèm link.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
@@ -9,7 +9,7 @@
     "https://m.facebook.com/*",
     "https://generativelanguage.googleapis.com/*"
   ],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {
       "matches": ["https://www.facebook.com/*"],

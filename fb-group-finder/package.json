@@ -1,7 +1,8 @@
 {
   "name": "fb-group-finder",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
+  "type": "module",
   "scripts": {
     "test": "node --test *.test.mjs",
     "lint": "eslint .",

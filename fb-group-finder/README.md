@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.1.3**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.1.4**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -49,6 +49,14 @@ Báo cáo từ nhóm đang lỗi có 7 vùng nội dung nhưng 2 khung `article`
 - Chẩn đoán bổ sung các dạng link trong feed và mẫu link bên trong khung bài, kể cả khi cây cấu trúc bị cắt ở 160 phần tử. URL và định danh vẫn được ẩn. Nếu vẫn lỗi, bấm **Tải chẩn đoán** sau khi quét rồi gửi báo cáo mới.
 
 Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không đọc nội dung nằm hoàn toàn trong ảnh, không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được và yêu cầu tìm kiếm được gửi tới Gemini để lọc.
+
+### Bản 0.1.4: Gemini báo 404 cho model cũ
+
+Lỗi `models/gemini-2.5-flash is no longer available to new users` xuất hiện sau khi extension đã đọc được bài và gọi Gemini. Mặc định mới là `gemini-3.6-flash` theo hướng dẫn trong lỗi API và [tài liệu model](https://ai.google.dev/gemini-api/docs/models/gemini-3.6-flash).
+
+- Cấu hình `gemini-2.5-flash` đã lưu tự chuyển sang `gemini-3.6-flash` khi lọc; không cần nhập lại API key. Model tùy chọn khác được giữ nguyên.
+- Vẫn dùng `generateContent` và JSON output. Bỏ cấu hình `thinkingBudget: 0` dành cho model cũ để dùng cấu hình thinking mặc định của model.
+- Cài đặt cho phép nhập mã model khác, kể cả dạng `models/<mã model>`. Nếu gặp 404, thông báo hướng dẫn đổi model. Không tự thử nhiều model hoặc chuyển sang Pro.
 
 ## Kiểm tra mã nguồn
 

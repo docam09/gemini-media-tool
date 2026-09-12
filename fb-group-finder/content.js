@@ -7,7 +7,7 @@
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
   const LINK = 'a, [role="link"]';
   const LINK_WITH_HREF = 'a[href], [role="link"][href]';
-  const VERSION = "0.1.3";
+  const VERSION = "0.1.4";
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let scanning = false;
   let stopRequested = false;

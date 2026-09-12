@@ -1,6 +1,4 @@
-// Service worker: calls Gemini to filter scraped posts against the user's query.
-
-const DEFAULT_MODEL = "gemini-2.5-flash";
+import { DEFAULT_MODEL, resolveModel } from "./gemini-model.js";
 
 function buildPrompt(query, posts) {
   const items = posts
@@ -20,23 +18,25 @@ ${items}`;
 }
 
 async function callGemini({ apiKey, model, query, posts }) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || DEFAULT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const body = {
     contents: [{ role: "user", parts: [{ text: buildPrompt(query, posts) }] }],
     generationConfig: {
       temperature: 0.1,
       responseMimeType: "application/json",
-      thinkingConfig: { thinkingBudget: 0 },
     },
   };
-  let res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
-    const errText = await res.text();
-    if (/thinking/i.test(errText)) {
-      delete body.generationConfig.thinkingConfig;
-      res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    }
-    if (!res.ok) throw new Error(`Gemini ${res.status}: ${errText.slice(0, 300)}`);
+    const errText = (await res.text()).replaceAll(apiKey, "[ẩn API key]").slice(0, 300);
+    const guidance = res.status === 404
+      ? `Model ${model} không khả dụng với API key này. Mở Cài đặt để đổi model (mặc định: ${DEFAULT_MODEL}). `
+      : "";
+    throw new Error(`Gemini ${res.status}: ${guidance}${errText}`);
   }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "{}";
@@ -58,11 +58,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     const { geminiApiKey, geminiModel } = await chrome.storage.sync.get(["geminiApiKey", "geminiModel"]);
     if (!geminiApiKey) throw new Error("Chưa nhập Gemini API key (mở phần Cài đặt).");
+    const model = resolveModel(geminiModel);
+    if (model !== geminiModel) await chrome.storage.sync.set({ geminiModel: model });
     const chunk = 25;
     const all = [];
     for (let i = 0; i < msg.posts.length; i += chunk) {
       const part = msg.posts.slice(i, i + chunk);
-      all.push(...(await callGemini({ apiKey: geminiApiKey, model: geminiModel, query: msg.query, posts: part })));
+      all.push(...(await callGemini({ apiKey: geminiApiKey, model, query: msg.query, posts: part })));
     }
     all.sort((a, b) => (b.score || 0) - (a.score || 0));
     sendResponse({ ok: true, results: all });
