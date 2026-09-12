@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 14px system-ui, sans-serif; max-width: 520px; margin: 40px auto; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    input, select { width: 100%; padding: 6px; box-sizing: border-box; }
+    button { margin-top: 16px; background: #1877f2; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; }
+    #msg { color: #2e7d32; margin-left: 8px; }
+    small { color: #606770; }
+  </style>
+</head>
+<body>
+  <h2>FB Group Finder – Cài đặt</h2>
+  <label>Gemini API key</label>
+  <input id="key" type="password" placeholder="AIza..." />
+  <small>Lấy key tại <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>. Key chỉ lưu trong Chrome của bạn.</small>
+  <label>Model</label>
+  <input id="model" list="models" placeholder="gemini-3.6-flash" />
+  <datalist id="models">
+    <option value="gemini-3.6-flash"></option>
+  </datalist>
+  <small>Mặc định: gemini-3.6-flash. Có thể nhập mã model khác hỗ trợ generateContent và JSON output.
+    Cấu hình gemini-2.5-flash cũ tự chuyển sang gemini-3.6-flash.</small>
+  <button id="save">Lưu</button><span id="msg"></span>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

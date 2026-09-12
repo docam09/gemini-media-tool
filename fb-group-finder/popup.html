@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px/1.4 system-ui, sans-serif; width: 420px; margin: 0; padding: 12px; color: #1c1e21; }
+    h1 { font-size: 15px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; }
+    h1 a { font-size: 12px; font-weight: normal; }
+    textarea { width: 100%; box-sizing: border-box; height: 60px; resize: vertical; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .row label { flex: 1; }
+    input[type=number] { width: 60px; }
+    button { background: #1877f2; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    button:disabled { background: #9cc0f5; cursor: default; }
+    #status { color: #606770; margin: 6px 0; min-height: 16px; }
+    #error { color: #c0392b; white-space: pre-wrap; }
+    .card { border: 1px solid #dddfe2; border-radius: 8px; padding: 8px; margin: 8px 0; }
+    .card .meta { color: #606770; font-size: 12px; }
+    .card .score { float: right; background: #e7f3ff; color: #1877f2; border-radius: 10px; padding: 0 6px; }
+    .card .extract { margin: 4px 0; }
+    .card .extract span { display: inline-block; background: #f0f2f5; border-radius: 4px; padding: 1px 6px; margin: 2px 2px 0 0; }
+    details { margin-top: 4px; }
+    details pre { white-space: pre-wrap; font: inherit; max-height: 160px; overflow: auto; background: #f7f8fa; padding: 6px; }
+    #tools { display: none; gap: 8px; }
+    #tools button { background: #e4e6eb; color: #050505; }
+    #stop, #diagnose { background: #e4e6eb; color: #050505; }
+    #diagnosticStatus { color: #606770; font-size: 12px; margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h1>FB Group Finder <a href="#" id="openOptions">Cài đặt</a></h1>
+  <textarea id="query" placeholder="Bạn cần tìm gì trong nhóm này? VD: bài cho thuê phòng gần KCN Yên Phong dưới 3 triệu, có SĐT liên hệ"></textarea>
+  <div class="row">
+    <label>Số bài tối đa <input type="number" id="maxPosts" min="1" max="300" step="1" value="60" /></label>
+    <button id="run">Quét & lọc</button>
+    <button id="stop" disabled>Dừng</button>
+  </div>
+  <div id="status"></div>
+  <div id="error"></div>
+  <button id="diagnose">Tải chẩn đoán</button>
+  <div id="diagnosticStatus">Báo cáo chỉ ghi cấu trúc trang và số lượng, không chứa nội dung bài hay địa chỉ nhóm.</div>
+  <div id="tools"><button id="copy">Copy kết quả</button><button id="csv">Tải CSV</button></div>
+  <div id="results"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
