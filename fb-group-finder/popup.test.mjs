@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 
 const html = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
 const source = readFileSync(new URL("./popup.js", import.meta.url), "utf8");
+const { version } = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8"));
 
 test("shows scanner diagnostics without calling Gemini when no post was extracted", async (t) => {
   const dom = new JSDOM(html, { runScripts: "outside-only" });
@@ -14,13 +15,13 @@ test("shows scanner diagnostics without calling Gemini when no post was extracte
   window.chrome = {
     storage: { local: { get: async () => ({}), set: async () => {} } },
     runtime: {
-      getManifest: () => ({ version: "0.1.2" }),
+      getManifest: () => ({ version }),
       onMessage: { addListener: () => {} },
       sendMessage: async () => { filterCalls++; },
     },
     tabs: {
       query: async () => [{ id: 5, url: "https://www.facebook.com/groups/123/" }],
-      sendMessage: async (_tab, message) => message.type === "PING" ? { isGroup: true, version: "0.1.2" } : {
+      sendMessage: async (_tab, message) => message.type === "PING" ? { isGroup: true, version } : {
         ok: true, posts: [], diagnostics: { candidates: 8, missingLinks: 8, missingText: 2, scrolls: 12 },
       },
     },
@@ -45,13 +46,13 @@ test("respects a two-post limit and uses a bounded scroll budget", async (t) => 
   window.chrome = {
     storage: { local: { get: async () => ({}), set: async () => {} } },
     runtime: {
-      getManifest: () => ({ version: "0.1.2" }),
+      getManifest: () => ({ version }),
       onMessage: { addListener: () => {} },
     },
     tabs: {
       query: async () => [{ id: 5, url: "https://www.facebook.com/groups/123/" }],
       sendMessage: async (_tab, message) => {
-        if (message.type === "PING") return { isGroup: true, version: "0.1.2" };
+        if (message.type === "PING") return { isGroup: true, version };
         requested = message.opts;
         return { ok: true, posts: [] };
       },
@@ -77,14 +78,14 @@ test("stopping a scan never sends partially collected posts to Gemini", async (t
   window.chrome = {
     storage: { local: { get: async () => ({}), set: async () => {} } },
     runtime: {
-      getManifest: () => ({ version: "0.1.2" }),
+      getManifest: () => ({ version }),
       onMessage: { addListener: () => {} },
       sendMessage: async () => { filterCalls++; },
     },
     tabs: {
       query: async () => [{ id: 5, url: "https://www.facebook.com/groups/123/" }],
       sendMessage: async (_tab, message) => {
-        if (message.type === "PING") return { isGroup: true, version: "0.1.2" };
+        if (message.type === "PING") return { isGroup: true, version };
         if (message.type === "SCAN") {
           signalScanStarted();
           return new Promise((resolve) => { finishScan = resolve; });
@@ -114,7 +115,7 @@ test("requires refreshing a tab still running an older content script", async (t
   window.chrome = {
     storage: { local: { get: async () => ({}), set: async () => {} } },
     runtime: {
-      getManifest: () => ({ version: "0.1.2" }),
+      getManifest: () => ({ version }),
       onMessage: { addListener: () => {} },
     },
     tabs: {
@@ -143,13 +144,13 @@ test("downloads the diagnostic response without running a scan or calling Gemini
   window.chrome = {
     storage: { local: { get: async () => ({}) } },
     runtime: {
-      getManifest: () => ({ version: "0.1.2" }),
+      getManifest: () => ({ version }),
       onMessage: { addListener: () => {} },
     },
     tabs: {
       query: async () => [{ id: 5, url: "https://www.facebook.com/groups/123/" }],
       sendMessage: async (_tab, message) => {
-        if (message.type === "PING") return { isGroup: true, version: "0.1.2" };
+        if (message.type === "PING") return { isGroup: true, version };
         assert.equal(message.type, "DIAGNOSE");
         return { ok: true, report: { candidateCount: 2 } };
       },

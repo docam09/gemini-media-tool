@@ -5,7 +5,9 @@
 
   const ARTICLE = 'article, [role="article"]';
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
-  const VERSION = "0.1.2";
+  const LINK = 'a, [role="link"]';
+  const LINK_WITH_HREF = 'a[href], [role="link"][href]';
+  const VERSION = "0.1.3";
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let scanning = false;
   let stopRequested = false;
@@ -56,7 +58,7 @@
   }
 
   function findPermalink(post) {
-    for (const anchor of post.querySelectorAll("a[href]")) {
+    for (const anchor of post.querySelectorAll(LINK_WITH_HREF)) {
       if (!belongsToPost(anchor, post)) continue;
       const url = postUrl(anchor.getAttribute("href"));
       if (url) return { url, label: anchor.getAttribute("aria-label") || "" };
@@ -68,36 +70,45 @@
     return document.querySelector('[role="feed"]') || document.querySelector('[role="main"], main') || document.body;
   }
 
+  function messagesIn(post) {
+    const nodes = post.matches(MESSAGE) ? [post] : [...post.querySelectorAll(MESSAGE)];
+    return nodes.filter((node) => !node.parentElement.closest(MESSAGE) && belongsToPost(node, post));
+  }
+
   function findCandidates() {
     const root = feedRoot();
     const candidates = new Set();
     for (const unit of root.querySelectorAll('[data-pagelet^="FeedUnit"]')) {
-      if (!unit.parentElement.closest(`${ARTICLE}, [data-pagelet^="FeedUnit"]`)) candidates.add(unit);
+      if (!unit.parentElement.closest(`${ARTICLE}, [data-pagelet^="FeedUnit"]`) &&
+          (findText(unit) || findPermalink(unit))) candidates.add(unit);
     }
     for (const article of root.querySelectorAll(ARTICLE)) {
       if (!article.parentElement.closest(ARTICLE) && !isComment(article) &&
-          ![...candidates].some((post) => post.contains(article))) candidates.add(article);
+          ![...candidates].some((post) => post.contains(article)) &&
+          (findText(article) || findPermalink(article))) candidates.add(article);
     }
     const seeds = [
-      ...root.querySelectorAll(MESSAGE),
-      ...[...root.querySelectorAll("a[href]")].filter((anchor) => postUrl(anchor.getAttribute("href"))),
+      ...[...root.querySelectorAll(MESSAGE)].filter((node) => !node.parentElement.closest(MESSAGE)),
+      ...[...root.querySelectorAll(LINK_WITH_HREF)].filter((anchor) => postUrl(anchor.getAttribute("href"))),
     ];
     for (const seed of seeds) {
       if (isComment(seed) || [...candidates].some((post) => post.contains(seed))) continue;
+      let candidate = seed.matches(MESSAGE) && findText(seed) ? seed : null;
       for (let parent = seed.parentElement; parent && parent !== root; parent = parent.parentElement) {
         if ([...candidates].some((post) => parent.contains(post))) break;
-        const messages = [...parent.querySelectorAll(MESSAGE)].filter((node) =>
-          !node.parentElement.closest(MESSAGE) && belongsToPost(node, parent));
+        const messages = messagesIn(parent);
         if (messages.length > 1) break;
-        const links = new Set([...parent.querySelectorAll("a[href]")]
+        const links = new Set([...parent.querySelectorAll(LINK_WITH_HREF)]
           .filter((node) => belongsToPost(node, parent))
           .map((node) => postUrl(node.getAttribute("href"))).filter(Boolean));
         if (links.size > 1) break;
+        if (messages.length === 1 && findText(parent)) candidate = parent;
         if (links.size === 1 && findText(parent)) {
-          candidates.add(parent);
+          candidate = parent;
           break;
         }
       }
+      if (candidate) candidates.add(candidate);
     }
     return [...candidates].filter((post) => !post.closest('form, [role="dialog"]'));
   }
@@ -107,11 +118,11 @@
   }
 
   function findText(post) {
-    const message = [...post.querySelectorAll(MESSAGE)].find((node) => belongsToPost(node, post));
+    const message = messagesIn(post)[0];
     if (message) return textOf(message);
     const parts = [];
     for (const node of post.querySelectorAll('[dir="auto"]')) {
-      if (!belongsToPost(node, post) || node.closest('[role="button"], button, a, h2, h3, h4, ul')) continue;
+      if (!belongsToPost(node, post) || node.closest('[role="button"], button, a, [role="link"], h2, h3, h4, ul')) continue;
       const text = textOf(node);
       if (text && !parts.some((part) => part.includes(text))) parts.push(text);
     }
@@ -131,6 +142,37 @@
       }
     }
     if (clicked) await sleep(400);
+  }
+
+  function headerLinks(post) {
+    const message = messagesIn(post)[0];
+    if (!message) return [];
+    return [...post.querySelectorAll(LINK)].filter((link) => {
+      if (!belongsToPost(link, post) || link.closest('h2, h3, h4, button, [role="button"]') ||
+          link.contains(message) || !(link.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+      try {
+        const url = new URL(link.getAttribute("href") || location.href, location.origin);
+        return url.protocol === "https:" && ["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname) &&
+          !url.searchParams.has("comment_id") && !url.searchParams.has("reply_comment_id");
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  async function revealPermalinks(candidates, activated, diagnostics) {
+    const links = candidates.filter((post) => !findPermalink(post))
+      .flatMap(headerLinks).filter((link) => link.isConnected && !activated.has(link)).slice(0, 20);
+    if (!links.length) return;
+    for (const link of links) {
+      activated.add(link);
+      diagnostics.linkActivations++;
+      link.dispatchEvent(new FocusEvent("focusin", { view: window, bubbles: true, cancelable: true }));
+    }
+    await sleep(600);
+    for (const link of links) {
+      if (link.isConnected) link.dispatchEvent(new FocusEvent("focusout", { view: window, bubbles: true }));
+    }
   }
 
   function collectPosts(candidates, posts, limit, diagnostics) {
@@ -237,9 +279,9 @@
       feedUnits: root.querySelectorAll('[data-pagelet^="FeedUnit"]').length,
       messages: root.querySelectorAll(MESSAGE).length,
       dirAuto: root.querySelectorAll('[dir="auto"]').length,
-      links: root.querySelectorAll("a[href]").length,
+      links: root.querySelectorAll(LINK_WITH_HREF).length,
       linksWithoutHref: root.querySelectorAll('[role="link"]:not([href]), a:not([href])').length,
-      acceptedLinks: [...root.querySelectorAll("a[href]")].filter((node) => postUrl(node.getAttribute("href"))).length,
+      acceptedLinks: [...root.querySelectorAll(LINK_WITH_HREF)].filter((node) => postUrl(node.getAttribute("href"))).length,
       images: root.querySelectorAll("img").length,
     };
   }
@@ -247,8 +289,14 @@
   function diagnose() {
     const root = feedRoot();
     const candidates = findCandidates();
+    const patterns = new Map();
+    for (const link of root.querySelectorAll(LINK)) {
+      const shape = linkShape(link.getAttribute("href"));
+      const key = JSON.stringify(shape);
+      patterns.set(key, { ...shape, count: (patterns.get(key)?.count || 0) + 1 });
+    }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       extensionVersion: VERSION,
       pageType: linkShape(location.href).route,
       scanning,
@@ -258,10 +306,12 @@
       regions: [...document.querySelectorAll('main, [role="main"], [role="feed"]')].slice(0, 6)
         .map((node) => ({ node: describeNode(node), counts: selectorCounts(node) })),
       candidateCount: candidates.length,
+      linkPatterns: [...patterns.values()].slice(0, 40),
       samples: (candidates.length ? candidates.slice(0, 3) : [root]).map((post) => ({
         hasPermalink: Boolean(findPermalink(post)),
         extractedTextLength: findText(post).length,
         counts: selectorCounts(post),
+        links: [...post.querySelectorAll(LINK)].slice(0, 24).map(describeNode),
         structure: structure(post),
       })),
     };
@@ -272,7 +322,8 @@
     const maxScrolls = bounded(opts.maxScrolls, 60, 120);
     const posts = new Map();
     const expanded = new WeakSet();
-    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, scrolls: 0, stopReason: "running" };
+    const activated = new WeakSet();
+    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
     lastScan = { maxPosts, maxScrolls, scanned: 0, ...diagnostics };
     const startPath = location.pathname + location.search;
     let previous = "";
@@ -285,10 +336,12 @@
       }
       if (location.pathname + location.search !== startPath) throw new Error("Trang Facebook đã thay đổi. Hãy quét lại trên nhóm cần tìm.");
       await expandSeeMore(findCandidates(), expanded);
+      if (!stopRequested) await revealPermalinks(findCandidates(), activated, diagnostics);
       if (stopRequested) {
         diagnostics.stopReason = "user-stopped";
         break;
       }
+      if (location.pathname + location.search !== startPath) throw new Error("Trang Facebook đã thay đổi. Hãy quét lại trên nhóm cần tìm.");
       const candidates = findCandidates();
       collectPosts(candidates, posts, maxPosts, diagnostics);
       lastScan = { maxPosts, maxScrolls, scanned: posts.size, ...diagnostics };

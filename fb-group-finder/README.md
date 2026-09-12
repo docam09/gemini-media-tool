@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.1.2**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.1.3**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -38,6 +38,15 @@ Bản 0.1.1 vẫn có thể nhận diện khung nhưng không lấy được n�
 - Giới hạn số bài từ **1 đến 300**; chọn **2** sẽ lấy tối đa 2 bài để lọc, với tối đa 6 lượt cuộn. Đây là số bài đọc, không phải số kết quả khớp yêu cầu. Nếu chưa đọc được bài nào sau 12 lượt cuộn, extension dừng và đề nghị chẩn đoán.
 - Bấm **Dừng** để hủy quét, không gửi các bài đã đọc dở tới Gemini. Giữ popup mở tới khi hoàn tất; đóng popup sẽ làm mất bước nhận kết quả của lượt đó.
 - Tab còn chạy content script cũ sẽ yêu cầu bấm F5 trước khi quét.
+
+### Bản 0.1.3: khung bài không có `role="article"`
+
+Báo cáo từ nhóm đang lỗi có 7 vùng nội dung nhưng 2 khung `article` đều rỗng và không có link được bộ đọc chấp nhận. Bộ đọc trước bỏ qua vùng nội dung nếu chưa tìm được permalink.
+
+- Bỏ qua khung rỗng. Tìm ranh giới khung chứa một vùng nội dung, giữ khung đó ngay cả khi link chưa xuất hiện; không gộp nội dung các bài liền nhau.
+- Khi khung chưa có permalink, gửi sự kiện `focusin` tới các link trước vùng nội dung và chờ Facebook cập nhật `href`. Mỗi phần tử chỉ được thử một lần trong lượt quét, tối đa 20 phần tử mỗi lượt cuộn. Không nhấp link, không chuyển trang và không đổi vị trí bàn phím đang focus. Đây là bước thử khôi phục link động, chưa được xác nhận trên giao diện thực tế của người dùng.
+- Đọc cả link có `role="link"`. Chỉ đưa bài có link được xác thực vào Gemini; nếu Facebook vẫn không cung cấp permalink thì ghi rõ thiếu link.
+- Chẩn đoán bổ sung các dạng link trong feed và mẫu link bên trong khung bài, kể cả khi cây cấu trúc bị cắt ở 160 phần tử. URL và định danh vẫn được ẩn. Nếu vẫn lỗi, bấm **Tải chẩn đoán** sau khi quét rồi gửi báo cáo mới.
 
 Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không đọc nội dung nằm hoàn toàn trong ảnh, không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được và yêu cầu tìm kiếm được gửi tới Gemini để lọc.
 

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { JSDOM } from "jsdom";
 
 const source = readFileSync(new URL("./content.js", import.meta.url), "utf8");
+const manifest = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8"));
 const post = (id, text = "Nồi cơm Tiger 1,2 triệu", extra = "") => `
   <div role="article"><h2>Người bán</h2>
     <a href="/groups/123/posts/${id}/?__cft__=tracking" aria-label="1 giờ">1h</a>
@@ -271,7 +272,7 @@ test("diagnostics preserve useful structure without content, URLs, identifiers, 
   f.window.document.title = "PRIVATE_GROUP_TITLE";
   const { report } = await f.send({ type: "DIAGNOSE" });
   const json = JSON.stringify(report);
-  assert.equal(report.extensionVersion, "0.1.2");
+  assert.equal(report.extensionVersion, manifest.version);
   assert.equal(report.candidateCount, 1);
   assert.equal(report.samples[0].hasPermalink, true);
   assert.ok(report.samples[0].extractedTextLength > 0);
@@ -314,5 +315,103 @@ test("a stop request cancels the in-flight scan before another scroll", async (t
   const result = await scan;
   assert.equal(result.canceled, true);
   assert.equal(result.diagnostics.stopReason, "user-stopped");
+  assert.equal(f.scrolls, 0);
+});
+
+const unresolvedCard = (id) => `<section>
+  <header><h3><a href="/groups/123/user/456/">Người bán</a></h3>
+    <span role="link" data-test-post="${id}" tabindex="0">2 giờ</span></header>
+  <div><div data-ad-preview="message">Tiger ${id} - 900k
+    <a href="https://example.com/catalog">Catalog</a></div></div>
+</section>`;
+const loadingArticle = '<div role="article"><div role="status" aria-label="Loading"><div></div></div></div>';
+
+test("finds seven text cards despite two empty article placeholders and zero permalinks", async (t) => {
+  const f = fixture(t, Array.from({ length: 7 }, (_, i) => unresolvedCard(i + 1)).join("") + loadingArticle.repeat(2));
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  assert.equal(report.documentCounts.articles, 2);
+  assert.equal(report.documentCounts.messages, 7);
+  assert.equal(report.documentCounts.acceptedLinks, 0);
+  assert.equal(report.candidateCount, 7);
+  assert.ok(report.samples.every((sample) => sample.extractedTextLength > 0 && !sample.hasPermalink));
+  assert.ok(report.samples[0].links.some((link) => link.link?.route === "missing"));
+});
+
+test("waits for header focus to reveal permalinks without clicking or joining adjacent posts", async (t) => {
+  const pending = [];
+  const f = fixture(t, unresolvedCard("10") + unresolvedCard("20") + loadingArticle.repeat(2), {
+    onWait: () => {
+      for (const link of pending.splice(0)) {
+        link.setAttribute("href", `/groups/123/posts/${link.dataset.testPost}/`);
+      }
+    },
+  });
+  let clicks = 0;
+  let bodyFocus = 0;
+  f.window.document.addEventListener("click", () => { clicks++; });
+  f.window.document.querySelectorAll('[data-ad-preview="message"] a, h3 a').forEach((link) =>
+    link.addEventListener("focusin", () => { bodyFocus++; }));
+  f.window.document.querySelectorAll("[data-test-post]").forEach((link) =>
+    link.addEventListener("focusin", () => pending.push(link)));
+  const beforeFocus = f.window.document.activeElement;
+  const result = await f.scan({ maxPosts: 2 });
+  assert.deepEqual(result.posts.map((post) => post.url), [
+    "https://www.facebook.com/groups/123/posts/10/",
+    "https://www.facebook.com/groups/123/posts/20/",
+  ]);
+  assert.match(result.posts[0].text, /Tiger 10/);
+  assert.doesNotMatch(result.posts[0].text, /Tiger 20/);
+  assert.equal(result.diagnostics.linkActivations, 2);
+  assert.equal(f.scrolls, 0);
+  assert.equal(clicks, 0);
+  assert.equal(bodyFocus, 0);
+  assert.equal(f.window.document.activeElement, beforeFocus);
+});
+
+test("keeps text diagnostics when focus cannot resolve a link, without repeated focus or fabricated URLs", async (t) => {
+  const f = fixture(t, unresolvedCard("10") + loadingArticle);
+  let activations = 0;
+  f.window.document.querySelector("[data-test-post]").addEventListener("focusin", () => { activations++; });
+  const result = await f.scan();
+  assert.equal(activations, 1);
+  assert.equal(result.posts.length, 0);
+  assert.equal(result.diagnostics.candidates, 1);
+  assert.equal(result.diagnostics.missingLinks, 1);
+  assert.equal(result.diagnostics.missingText, 0);
+});
+
+test("supports an unwrapped message without treating neighboring timestamps as its link", async (t) => {
+  const f = fixture(t, '<a href="#">1 giờ</a><div data-ad-preview="message">Tiger 900k</div>' +
+    '<a href="#">2 giờ</a><div data-ad-preview="message">Toshiba 800k</div>');
+  const result = await f.scan();
+  assert.equal(result.posts.length, 0);
+  assert.equal(result.diagnostics.candidates, 2);
+  assert.equal(result.diagnostics.missingText, 0);
+});
+
+test("honors cancellation while waiting for a permalink", async (t) => {
+  const f = fixture(t, unresolvedCard("10"), {
+    onWait: (delay) => {
+      if (delay === 600) f.send({ type: "STOP_SCAN" });
+    },
+  });
+  const result = await f.scan();
+  assert.equal(result.canceled, true);
+  assert.equal(result.posts.length, 0);
+  assert.equal(result.diagnostics.linkActivations, 1);
+  assert.equal(f.scrolls, 0);
+});
+
+test("aborts a group change during link resolution before collecting the new group's posts", async (t) => {
+  const f = fixture(t, unresolvedCard("10"), {
+    onWait: (delay, window) => {
+      if (delay !== 600) return;
+      window.history.pushState({}, "", "/groups/456/");
+      window.document.querySelector('[role="feed"]').innerHTML = post("20").replace("/groups/123/", "/groups/456/");
+    },
+  });
+  const result = await f.scan({ maxPosts: 1 });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /đã thay đổi/);
   assert.equal(f.scrolls, 0);
 });
