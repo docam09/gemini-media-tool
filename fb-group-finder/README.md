@@ -19,16 +19,25 @@ Chạy hoàn toàn trên tab Facebook bạn đang đăng nhập, không lưu m�
 
 Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm trong nhóm) trước rồi mới quét để tập trung vào bài liên quan.
 
-## Cập nhật từ bản 0.1.0
+## Cập nhật từ bản cũ
 
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.1.1**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.1.2**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
-Nếu vẫn không có kết quả, thông báo sẽ ghi số khung bài nhận diện, khung thiếu link/nội dung và số lần cuộn. Gửi ảnh thông báo cùng ảnh một bài trong nhóm (có thể che thông tin riêng tư) để kiểm tra cấu trúc Facebook đang hiển thị. Các số khung là mức cao nhất quan sát trong một lượt, không phải tổng số bài trong nhóm.
+### Bản 0.1.2: chẩn đoán lỗi không đọc được bài
+
+Bản 0.1.1 vẫn có thể nhận diện khung nhưng không lấy được nội dung và link trên một số giao diện Facebook. Khi bộ đọc trả về 0 bài, Gemini chưa được gọi; đổi model không giải quyết lỗi ở bước này. Bản 0.1.2 bổ sung dữ liệu để xác định nguyên nhân, chưa xác nhận sửa được giao diện thực tế đang lỗi.
+
+- **Tải chẩn đoán** hoạt động ngay khi mở popup, cả khi đang quét. Mở nhóm, cuộn tới một bài đang hiển thị, rồi bấm nút này và gửi file `fb-group-diagnostic.json` cho người hỗ trợ. Không cần API key hoặc chạy Gemini.
+- Báo cáo gồm phiên bản, số vùng feed/khung bài, số link được chấp nhận, số vùng nội dung, nguyên nhân dừng và cấu trúc tối đa 3 khung (160 phần tử mỗi khung). Tên nhóm, nội dung bài, tên người đăng, URL, định danh trong thuộc tính và API key không được xuất. Link chỉ có dạng đường dẫn đã thay định danh bằng ký hiệu, không có link thực.
+- Tiến trình hiển thị số khung thiếu link/nội dung. Các số khung là mức cao nhất quan sát trong một lượt, không phải tổng số bài trong nhóm. Báo cáo riêng ghi cấu trúc hiện tại và thông số lượt quét gần nhất.
+- Giới hạn số bài từ **1 đến 300**; chọn **2** sẽ lấy tối đa 2 bài để lọc, với tối đa 6 lượt cuộn. Đây là số bài đọc, không phải số kết quả khớp yêu cầu. Nếu chưa đọc được bài nào sau 12 lượt cuộn, extension dừng và đề nghị chẩn đoán.
+- Bấm **Dừng** để hủy quét, không gửi các bài đã đọc dở tới Gemini. Giữ popup mở tới khi hoàn tất; đóng popup sẽ làm mất bước nhận kết quả của lượt đó.
+- Tab còn chạy content script cũ sẽ yêu cầu bấm F5 trước khi quét.
 
 Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không đọc nội dung nằm hoàn toàn trong ảnh, không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được và yêu cầu tìm kiếm được gửi tới Gemini để lọc.
 

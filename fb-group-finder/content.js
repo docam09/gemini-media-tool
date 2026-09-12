@@ -5,8 +5,11 @@
 
   const ARTICLE = 'article, [role="article"]';
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
+  const VERSION = "0.1.2";
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let scanning = false;
+  let stopRequested = false;
+  let lastScan = null;
 
   function postUrl(href) {
     try {
@@ -167,24 +170,135 @@
     return Math.min(max, Math.max(1, Math.floor(Number(value) || fallback)));
   }
 
+  function linkShape(href) {
+    if (!href) return { route: "missing" };
+    try {
+      const url = new URL(href, location.origin);
+      if (url.protocol !== "https:" || !["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname)) return { route: "external-or-non-https" };
+      let route = "other-facebook";
+      if (/^\/groups\/[^/]+\/(?:posts|permalink)\//.test(url.pathname)) route = "group-post";
+      else if (/^\/groups\/[^/]+\/search/.test(url.pathname)) route = "group-search";
+      else if (/^\/groups\/[^/]+/.test(url.pathname)) route = "group";
+      else if (/^\/(?:story|permalink)\.php$/.test(url.pathname)) route = "story";
+      else if (/^\/marketplace\//.test(url.pathname)) route = "marketplace";
+      else if (/^\/share\/p\//.test(url.pathname)) route = "share-post";
+      else if (/\/posts\//.test(url.pathname)) route = "profile-post";
+      const group = url.pathname.match(/^\/groups\/([^/]+)/)?.[1];
+      const publicSegments = ["groups", "posts", "permalink", "share", "p", "marketplace", "item", "photo", "photo.php", "videos", "watch", "story.php", "permalink.php", "search", "user", "profile.php"];
+      return {
+        route,
+        pathShape: url.pathname.split("/").filter(Boolean).map((part) => publicSegments.includes(part) ? part : /^\d+$/.test(part) ? ":number" : part.startsWith("pfbid") ? ":pfbid" : ":value"),
+        isFragmentLink: href.startsWith("#"),
+        accepted: Boolean(postUrl(href)),
+        sameGroup: group ? group === location.pathname.match(/^\/groups\/([^/]+)/)?.[1] : null,
+        queryKeys: ["story_fbid", "id", "multi_permalinks", "comment_id", "reply_comment_id"].filter((key) => url.searchParams.has(key)),
+        hasFragment: Boolean(url.hash),
+      };
+    } catch {
+      return { route: "invalid" };
+    }
+  }
+
+  function describeNode(node) {
+    const roles = ["article", "feed", "main", "button", "link", "dialog", "heading", "list", "listitem"];
+    const role = node.getAttribute("role");
+    return {
+      tag: node.tagName.toLowerCase(),
+      role: roles.includes(role) ? role : role ? "other" : null,
+      pagelet: node.hasAttribute("data-pagelet") ? (node.getAttribute("data-pagelet").startsWith("FeedUnit") ? "FeedUnit" : "other") : null,
+      attributes: ["data-ad-preview", "data-ad-comet-preview", "data-ad-rendering-role", "aria-label", "aria-labelledby", "aria-posinset", "dir", "href"].filter((name) => node.hasAttribute(name)),
+      isMessage: node.matches(MESSAGE),
+      isComment: isComment(node),
+      isSeeMore: node.matches('[role="button"], button') && ["xem thêm", "see more", "더 보기"].includes(textOf(node).toLocaleLowerCase()),
+      isDirAuto: node.getAttribute("dir") === "auto",
+      hasLayout: node.getClientRects().length > 0,
+      insideFormOrDialog: Boolean(node.closest('form, [role="dialog"]')),
+      textLength: textOf(node).length,
+      link: node.matches('a, [role="link"]') ? linkShape(node.getAttribute("href")) : null,
+    };
+  }
+
+  function structure(root, limit = 160) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    const indexes = new Map();
+    const nodes = [];
+    let node = root;
+    while (node && nodes.length < limit) {
+      indexes.set(node, nodes.length);
+      nodes.push({ parent: indexes.get(node.parentElement) ?? null, belongsToCandidate: belongsToPost(node, root), ...describeNode(node) });
+      node = walker.nextNode();
+    }
+    return { nodes, truncated: Boolean(node) };
+  }
+
+  function selectorCounts(root) {
+    return {
+      articles: root.querySelectorAll(ARTICLE).length,
+      feedUnits: root.querySelectorAll('[data-pagelet^="FeedUnit"]').length,
+      messages: root.querySelectorAll(MESSAGE).length,
+      dirAuto: root.querySelectorAll('[dir="auto"]').length,
+      links: root.querySelectorAll("a[href]").length,
+      linksWithoutHref: root.querySelectorAll('[role="link"]:not([href]), a:not([href])').length,
+      acceptedLinks: [...root.querySelectorAll("a[href]")].filter((node) => postUrl(node.getAttribute("href"))).length,
+      images: root.querySelectorAll("img").length,
+    };
+  }
+
+  function diagnose() {
+    const root = feedRoot();
+    const candidates = findCandidates();
+    return {
+      schemaVersion: 1,
+      extensionVersion: VERSION,
+      pageType: linkShape(location.href).route,
+      scanning,
+      lastScan,
+      documentCounts: selectorCounts(document),
+      selectedRoot: { node: describeNode(root), counts: selectorCounts(root) },
+      regions: [...document.querySelectorAll('main, [role="main"], [role="feed"]')].slice(0, 6)
+        .map((node) => ({ node: describeNode(node), counts: selectorCounts(node) })),
+      candidateCount: candidates.length,
+      samples: (candidates.length ? candidates.slice(0, 3) : [root]).map((post) => ({
+        hasPermalink: Boolean(findPermalink(post)),
+        extractedTextLength: findText(post).length,
+        counts: selectorCounts(post),
+        structure: structure(post),
+      })),
+    };
+  }
+
   async function scanFeed(opts, onProgress) {
     const maxPosts = bounded(opts.maxPosts, 60, 300);
     const maxScrolls = bounded(opts.maxScrolls, 60, 120);
     const posts = new Map();
     const expanded = new WeakSet();
-    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, scrolls: 0, stopReason: "scroll-limit" };
+    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, scrolls: 0, stopReason: "running" };
+    lastScan = { maxPosts, maxScrolls, scanned: 0, ...diagnostics };
     const startPath = location.pathname + location.search;
     let previous = "";
     let stalled = 0;
 
     for (let pass = 0; pass <= maxScrolls; pass++) {
+      if (stopRequested) {
+        diagnostics.stopReason = "user-stopped";
+        break;
+      }
       if (location.pathname + location.search !== startPath) throw new Error("Trang Facebook đã thay đổi. Hãy quét lại trên nhóm cần tìm.");
       await expandSeeMore(findCandidates(), expanded);
+      if (stopRequested) {
+        diagnostics.stopReason = "user-stopped";
+        break;
+      }
       const candidates = findCandidates();
       collectPosts(candidates, posts, maxPosts, diagnostics);
-      onProgress({ scanned: posts.size, scroll: pass, candidates: diagnostics.candidates });
+      lastScan = { maxPosts, maxScrolls, scanned: posts.size, ...diagnostics };
+      onProgress({ scanned: posts.size, scroll: pass, ...diagnostics });
       if (posts.size >= maxPosts) {
         diagnostics.stopReason = "post-limit";
+        break;
+      }
+      if (posts.size === 0 && pass >= 12) {
+        diagnostics.stopReason = "no-readable-posts";
         break;
       }
 
@@ -201,7 +315,10 @@
         diagnostics.stopReason = "feed-stalled";
         break;
       }
-      if (pass === maxScrolls) break;
+      if (pass === maxScrolls) {
+        diagnostics.stopReason = "scroll-limit";
+        break;
+      }
       const step = Math.max(400, Math.floor(viewport * 0.8));
       if (container === document.scrollingElement || container === document.documentElement) {
         window.scrollBy({ top: step, behavior: "instant" });
@@ -211,12 +328,22 @@
       diagnostics.scrolls++;
       await sleep(1200);
     }
-    return { posts: [...posts.values()], diagnostics };
+    lastScan = { maxPosts, maxScrolls, scanned: posts.size, ...diagnostics };
+    return { posts: [...posts.values()], diagnostics, canceled: stopRequested };
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === "PING") {
-      sendResponse({ ok: true, isGroup: /^\/groups\/[^/]+/.test(location.pathname), title: document.title });
+      sendResponse({ ok: true, version: VERSION, isGroup: /^\/groups\/[^/]+/.test(location.pathname), title: document.title });
+      return;
+    }
+    if (msg?.type === "DIAGNOSE") {
+      sendResponse({ ok: true, report: diagnose() });
+      return;
+    }
+    if (msg?.type === "STOP_SCAN") {
+      stopRequested = scanning;
+      sendResponse({ ok: true });
       return;
     }
     if (msg?.type !== "SCAN") return;
@@ -225,9 +352,13 @@
       return;
     }
     scanning = true;
+    stopRequested = false;
     scanFeed(msg.opts || {}, (progress) => chrome.runtime.sendMessage({ type: "SCAN_PROGRESS", ...progress }).catch(() => {}))
       .then((result) => sendResponse({ ok: true, ...result, groupTitle: document.title, groupUrl: location.href }))
-      .catch((error) => sendResponse({ ok: false, error: String(error) }))
+      .catch((error) => {
+        lastScan = { ...lastScan, stopReason: "error" };
+        sendResponse({ ok: false, error: String(error) });
+      })
       .finally(() => { scanning = false; });
     return true;
   });

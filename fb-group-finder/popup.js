@@ -5,7 +5,12 @@ const queryInput = document.querySelector("#query");
 const maxPostsInput = document.querySelector("#maxPosts");
 /** @type {HTMLButtonElement} */
 const runButton = document.querySelector("#run");
+/** @type {HTMLButtonElement} */
+const stopButton = document.querySelector("#stop");
+/** @type {HTMLButtonElement} */
+const diagnoseButton = document.querySelector("#diagnose");
 let lastResults = [];
+let scanningTabId = null;
 
 $("openOptions").onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
 
@@ -14,8 +19,13 @@ chrome.storage.local.get(["lastQuery", "maxPosts"]).then((s) => {
   if (s.maxPosts) maxPostsInput.value = s.maxPosts;
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "SCAN_PROGRESS") $("status").textContent = `Đã đọc ${msg.scanned} bài · ${msg.candidates || 0} khung bài · cuộn ${msg.scroll}`;
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type !== "SCAN_PROGRESS") return;
+  $("status").textContent = `Đọc Facebook: ${msg.scanned} bài · ${msg.candidates || 0} khung · thiếu link ${msg.missingLinks || 0}, thiếu nội dung ${msg.missingText || 0} · cuộn ${msg.scroll}. Chưa gọi Gemini.`;
+  if (sender?.tab?.id) {
+    scanningTabId = sender.tab.id;
+    stopButton.disabled = false;
+  }
 });
 
 async function getTab() {
@@ -24,13 +34,52 @@ async function getTab() {
 }
 
 async function ensureContent(tabId) {
+  let ping;
   try {
-    return await chrome.tabs.sendMessage(tabId, { type: "PING" });
+    ping = await chrome.tabs.sendMessage(tabId, { type: "PING" });
   } catch {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-    return chrome.tabs.sendMessage(tabId, { type: "PING" });
+    ping = await chrome.tabs.sendMessage(tabId, { type: "PING" });
   }
+  if (ping?.version !== chrome.runtime.getManifest().version) throw new Error("Tab Facebook đang chạy bản cũ. Hãy bấm F5 trên tab Facebook rồi thử lại.");
+  return ping;
 }
+
+stopButton.onclick = async () => {
+  stopButton.disabled = true;
+  try {
+    const tabId = scanningTabId ?? (await getTab())?.id;
+    if (tabId) await chrome.tabs.sendMessage(tabId, { type: "STOP_SCAN" });
+  } catch {
+    $("error").textContent = "Không liên lạc được với tab Facebook. Bấm F5 trên tab để dừng quét.";
+  }
+};
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+diagnoseButton.onclick = async () => {
+  diagnoseButton.disabled = true;
+  try {
+    const tab = await getTab();
+    if (!tab?.url?.startsWith("https://www.facebook.com/")) throw new Error("Hãy mở nhóm Facebook trước khi tải chẩn đoán.");
+    await ensureContent(tab.id);
+    const result = await chrome.tabs.sendMessage(tab.id, { type: "DIAGNOSE" });
+    if (!result?.ok) throw new Error("Không lấy được chẩn đoán. Tải lại tab Facebook và thử lại.");
+    download(new Blob([JSON.stringify(result.report, null, 2)], { type: "application/json" }), "fb-group-diagnostic.json");
+    $("diagnosticStatus").textContent = "Đã tải báo cáo chẩn đoán. Gửi file này để kiểm tra lỗi đọc Facebook.";
+  } catch (error) {
+    $("diagnosticStatus").textContent = error.message;
+  } finally {
+    diagnoseButton.disabled = false;
+  }
+};
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -56,7 +105,8 @@ function render(results) {
 
 runButton.onclick = async () => {
   const query = queryInput.value.trim();
-  const maxPosts = Math.min(300, Math.max(10, Math.floor(Number(maxPostsInput.value) || 60)));
+  const maxPosts = Math.min(300, Math.max(1, Math.floor(Number(maxPostsInput.value) || 60)));
+  maxPostsInput.value = String(maxPosts);
   $("error").textContent = "";
   $("results").innerHTML = "";
   $("tools").style.display = "none";
@@ -72,14 +122,21 @@ runButton.onclick = async () => {
   try {
     const ping = await ensureContent(tab.id);
     if (!ping?.isGroup) throw new Error("Hãy mở trang một nhóm Facebook rồi quét lại.");
-    $("status").textContent = "Bắt đầu quét...";
+    scanningTabId = tab.id;
+    stopButton.disabled = false;
+    $("status").textContent = "Đang đọc Facebook. Chưa gọi Gemini.";
 
-    const scan = await chrome.tabs.sendMessage(tab.id, { type: "SCAN", opts: { maxPosts, maxScrolls: Math.max(30, Math.min(120, maxPosts)) } });
+    const scan = await chrome.tabs.sendMessage(tab.id, { type: "SCAN", opts: { maxPosts, maxScrolls: Math.max(6, Math.min(120, maxPosts * 2)) } });
+    stopButton.disabled = true;
     if (!scan?.ok) throw new Error(scan?.error || "Quét thất bại");
+    if (scan.canceled) {
+      $("status").textContent = `Đã dừng quét (${scan.posts.length} bài đã đọc). Chưa gọi Gemini.`;
+      return;
+    }
     if (!scan.posts.length) {
       const d = scan.diagnostics;
       const detail = d ? ` Nhận diện ${d.candidates} khung bài; ${d.missingLinks} thiếu link, ${d.missingText} thiếu nội dung; đã cuộn ${d.scrolls} lần.` : "";
-      throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Hãy tải lại tab Facebook sau khi cập nhật extension. Nếu vẫn lỗi, gửi ảnh thông báo này và ảnh một bài đang hiển thị trong nhóm.`);
+      throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Gemini chưa được gọi. Nếu vừa cập nhật extension, hãy tải lại tab Facebook. Bấm “Tải chẩn đoán” và gửi báo cáo để kiểm tra cấu trúc trang.`);
     }
     $("status").textContent = `Đã đọc ${scan.posts.length} bài. Đang nhờ Gemini lọc...`;
 
@@ -94,6 +151,8 @@ runButton.onclick = async () => {
     $("status").textContent = "";
   } finally {
     runButton.disabled = false;
+    stopButton.disabled = true;
+    scanningTabId = null;
   }
 };
 

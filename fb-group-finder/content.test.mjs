@@ -258,3 +258,61 @@ test("aborts if Facebook navigates to another group during the scan", async (t) 
   assert.equal(result.ok, false);
   assert.match(result.error, /đã thay đổi/);
 });
+
+test("diagnostics preserve useful structure without content, URLs, identifiers, or secrets", async (t) => {
+  const f = fixture(t, `<article id="PERSONAL_ID">
+    <h2>PRIVATE_AUTHOR</h2>
+    <a href="/groups/123/posts/pfbidPrivatePost/?token=PRIVATE_TOKEN" aria-label="PRIVATE_DATE">PRIVATE_LABEL</a>
+    <div data-ad-preview="message">PRIVATE_POST_TEXT 0987654321</div>
+    <img src="https://example.com/PRIVATE_PHOTO">
+    <input type="password" value="PRIVATE_PASSWORD">
+    <script>window.key = 'PRIVATE_KEY';</script>
+  </article>`);
+  f.window.document.title = "PRIVATE_GROUP_TITLE";
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  const json = JSON.stringify(report);
+  assert.equal(report.extensionVersion, "0.1.2");
+  assert.equal(report.candidateCount, 1);
+  assert.equal(report.samples[0].hasPermalink, true);
+  assert.ok(report.samples[0].extractedTextLength > 0);
+  assert.ok(report.samples[0].structure.nodes.some((node) => node.link?.route === "group-post"));
+  assert.doesNotMatch(json, /PRIVATE|PrivatePost|0987654321|PERSONAL_ID|https:|\/groups\/123/);
+});
+
+test("diagnostics expose missing hrefs and messages outside the selected feed", async (t) => {
+  const f = fixture(t, '<article><span role="link">2 giờ</span><div data-ad-preview="message">Tiger 1 triệu</div></article>');
+  f.window.document.body.insertAdjacentHTML("beforeend", '<section role="feed"><article><a href="/groups/123/posts/10/">1h</a></article></section>');
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  assert.equal(report.samples[0].hasPermalink, false);
+  assert.equal(report.selectedRoot.counts.linksWithoutHref, 1);
+  assert.equal(report.selectedRoot.counts.acceptedLinks, 0);
+  assert.equal(report.documentCounts.acceptedLinks, 1);
+  assert.equal(report.regions.filter((region) => region.node.role === "feed").length, 2);
+});
+
+test("diagnostic samples are bounded on a large page", async (t) => {
+  const f = fixture(t, post("10", "Tiger", "<span>Extra text</span>".repeat(1000)).repeat(5));
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  assert.equal(report.samples.length, 3);
+  assert.equal(report.samples[0].structure.nodes.length, 160);
+  assert.equal(report.samples[0].structure.truncated, true);
+});
+
+test("stops an unreadable moving feed after twelve scrolls with an explicit reason", async (t) => {
+  const f = fixture(t, '<article><div data-ad-preview="message">Tiger</div></article>', { height: 100000 });
+  const result = await f.scan({ maxScrolls: 120 });
+  assert.equal(result.diagnostics.stopReason, "no-readable-posts");
+  assert.equal(f.scrolls, 12);
+  assert.equal(result.posts.length, 0);
+  assert.equal(f.progress.at(-1).missingLinks, 1);
+});
+
+test("a stop request cancels the in-flight scan before another scroll", async (t) => {
+  const f = fixture(t, post("10"), { height: 15000 });
+  const scan = f.scan();
+  await f.send({ type: "STOP_SCAN" });
+  const result = await scan;
+  assert.equal(result.canceled, true);
+  assert.equal(result.diagnostics.stopReason, "user-stopped");
+  assert.equal(f.scrolls, 0);
+});
