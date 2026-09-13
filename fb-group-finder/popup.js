@@ -1,0 +1,193 @@
+const $ = (id) => document.getElementById(id);
+/** @type {HTMLTextAreaElement} */
+const queryInput = document.querySelector("#query");
+/** @type {HTMLInputElement} */
+const maxPostsInput = document.querySelector("#maxPosts");
+/** @type {HTMLButtonElement} */
+const runButton = document.querySelector("#run");
+/** @type {HTMLButtonElement} */
+const stopButton = document.querySelector("#stop");
+/** @type {HTMLButtonElement} */
+const diagnoseButton = document.querySelector("#diagnose");
+const RUNNING = ["scanning", "filtering"];
+const JOB_STALE_MS = 2 * 60 * 1000;
+let lastResults = [];
+
+$("openOptions").onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
+
+// The scan/filter job runs in the background service worker and is mirrored into
+// chrome.storage.local ("job"), so the popup only displays that state and survives being closed.
+chrome.storage.local.get(["lastQuery", "maxPosts", "job"]).then((s) => {
+  if (s.lastQuery) queryInput.value = s.lastQuery;
+  if (s.maxPosts) maxPostsInput.value = s.maxPosts;
+  show(s.job);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.job) show(changes.job.newValue);
+});
+
+function isRunning(job) {
+  return !!job && RUNNING.includes(job.state) && Date.now() - (job.updatedAt || 0) < JOB_STALE_MS;
+}
+
+function isStale(job) {
+  return !!job && RUNNING.includes(job.state) && !isRunning(job);
+}
+
+function when(ts) {
+  return ts ? new Date(ts).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "";
+}
+
+function show(job) {
+  const running = isRunning(job);
+  runButton.disabled = running;
+  stopButton.disabled = !running;
+  $("status").textContent = isStale(job) ? "" : job?.status || "";
+  $("error").textContent = job?.state === "error"
+    ? job.error || ""
+    : isStale(job) ? "Lượt quét trước bị gián đoạn (tab Facebook đóng hoặc trình duyệt khởi động lại). Hãy quét lại." : "";
+  lastResults = job?.state === "done" && Array.isArray(job.results) ? job.results : [];
+  const header = $("resultsHeader");
+  if (job?.state === "done") {
+    header.textContent = `Kết quả cho “${job.query || ""}”${job.groupTitle ? " · " + job.groupTitle : ""}${job.finishedAt ? " · " + when(job.finishedAt) : ""}`;
+    header.style.display = "block";
+    render(lastResults);
+  } else {
+    header.style.display = "none";
+    $("results").innerHTML = "";
+  }
+  $("tools").style.display = lastResults.length ? "flex" : "none";
+  $("clear").style.display = job && !running ? "inline-block" : "none";
+}
+
+async function getTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+async function ensureContent(tabId) {
+  let ping;
+  try {
+    ping = await chrome.tabs.sendMessage(tabId, { type: "PING" });
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    ping = await chrome.tabs.sendMessage(tabId, { type: "PING" });
+  }
+  if (ping?.version !== chrome.runtime.getManifest().version) throw new Error("Tab Facebook đang chạy bản cũ. Hãy bấm F5 trên tab Facebook rồi thử lại.");
+  return ping;
+}
+
+stopButton.onclick = async () => {
+  stopButton.disabled = true;
+  const reply = await chrome.runtime.sendMessage({ type: "STOP" }).catch(() => null);
+  if (!reply?.ok) $("error").textContent = "Không liên lạc được với tab Facebook. Bấm F5 trên tab để dừng quét.";
+};
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+diagnoseButton.onclick = async () => {
+  diagnoseButton.disabled = true;
+  try {
+    const tab = await getTab();
+    if (!tab?.url?.startsWith("https://www.facebook.com/")) throw new Error("Hãy mở nhóm Facebook trước khi tải chẩn đoán.");
+    await ensureContent(tab.id);
+    const result = await chrome.tabs.sendMessage(tab.id, { type: "DIAGNOSE" });
+    if (!result?.ok) throw new Error("Không lấy được chẩn đoán. Tải lại tab Facebook và thử lại.");
+    download(new Blob([JSON.stringify(result.report, null, 2)], { type: "application/json" }), "fb-group-diagnostic.json");
+    $("diagnosticStatus").textContent = "Đã tải báo cáo chẩn đoán. Gửi file này để kiểm tra lỗi đọc Facebook.";
+  } catch (error) {
+    $("diagnosticStatus").textContent = error.message;
+  } finally {
+    diagnoseButton.disabled = false;
+  }
+};
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function render(results) {
+  const box = $("results");
+  box.innerHTML = "";
+  if (!results.length) { box.innerHTML = "<p>Không tìm thấy bài phù hợp.</p>"; return; }
+  for (const r of results) {
+    const ex = Object.entries(r.extracted || {}).map(([k, v]) => `<span><b>${esc(k)}</b>: ${esc(v)}</span>`).join("");
+    const images = Array.isArray(r.images) ? r.images : [];
+    const comments = Array.isArray(r.comments) ? r.comments : [];
+    const media = [images.length ? `${images.length} ảnh` : "", comments.length ? `${comments.length} bình luận` : ""].filter(Boolean).join(", ");
+    const commentList = comments.length
+      ? `<details><summary>Bình luận (${comments.length})</summary><pre>${comments.map((c) => esc((c.author ? c.author + ": " : "") + c.text)).join("\n")}</pre></details>`
+      : "";
+    box.insertAdjacentHTML("beforeend", `
+      <div class="card">
+        <span class="score">${Math.round((r.score || 0) * 100)}%</span>
+        <div class="meta">${esc(r.author)} ${r.time ? "· " + esc(r.time) : ""}${media ? " · " + esc(media) : ""}</div>
+        <div>${esc(r.summary)}</div>
+        <div class="extract">${ex}</div>
+        <a href="${esc(r.url)}" target="_blank">Mở bài viết ↗</a>
+        <details><summary>Nội dung gốc</summary><pre>${esc(r.text)}</pre></details>${commentList}
+      </div>`);
+  }
+}
+
+runButton.onclick = async () => {
+  const query = queryInput.value.trim();
+  const maxPosts = Math.min(300, Math.max(1, Math.floor(Number(maxPostsInput.value) || 60)));
+  maxPostsInput.value = String(maxPosts);
+  $("error").textContent = "";
+  if (!query) { $("error").textContent = "Nhập yêu cầu tìm kiếm trước."; return; }
+  chrome.storage.local.set({ lastQuery: query, maxPosts });
+
+  const tab = await getTab();
+  if (!tab?.url?.startsWith("https://www.facebook.com/")) {
+    $("error").textContent = "Hãy mở một nhóm Facebook (www.facebook.com/groups/...) rồi bấm lại.";
+    return;
+  }
+  runButton.disabled = true;
+  try {
+    const ping = await ensureContent(tab.id);
+    if (!ping?.isGroup) throw new Error("Hãy mở trang một nhóm Facebook rồi quét lại.");
+    const reply = await chrome.runtime.sendMessage({
+      type: "RUN", tabId: tab.id, query, maxPosts, groupTitle: ping.title || "",
+      maxScrolls: Math.max(6, Math.min(120, maxPosts * 2)),
+    });
+    if (!reply?.ok) throw new Error(reply?.error || "Không khởi động được lượt quét.");
+    $("status").textContent = "Đang đọc Facebook. Có thể đóng popup hoặc chuyển tab; kết quả được giữ lại.";
+  } catch (e) {
+    $("error").textContent = e.message || String(e);
+    runButton.disabled = false;
+  }
+};
+
+$("clear").onclick = async () => {
+  await chrome.storage.local.remove("job");
+  show(null);
+};
+
+$("copy").onclick = () => {
+  const txt = lastResults.map((r) => `- ${r.summary}\n  ${r.url}`).join("\n");
+  navigator.clipboard.writeText(txt);
+  $("status").textContent = "Đã copy.";
+};
+
+$("csv").onclick = () => {
+  const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const rows = [["score", "author", "time", "summary", "extracted", "images", "comments", "url"]];
+  for (const r of lastResults) {
+    const comments = (r.comments || []).map((c) => (c.author ? c.author + ": " : "") + c.text).join("\n");
+    rows.push([r.score, r.author, r.time, r.summary, JSON.stringify(r.extracted), (r.images || []).length, comments, r.url]);
+  }
+  const blob = new Blob(["\ufeff" + rows.map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "fb-group-results.csv";
+  a.click();
+};

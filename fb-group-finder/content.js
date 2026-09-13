@@ -1,0 +1,516 @@
+(() => {
+  const installed = Symbol.for("fb-group-finder.content");
+  if (globalThis[installed]) return;
+  globalThis[installed] = true;
+
+  const ARTICLE = 'article, [role="article"]';
+  const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
+  const LINK = 'a, [role="link"]';
+  const LINK_WITH_HREF = 'a[href], [role="link"][href]';
+  const VERSION = "0.2.3";
+  const MAX_IMAGES = 4;
+  const MAX_COMMENTS = 12;
+  const COMMENT_LABEL = /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let scanning = false;
+  let stopRequested = false;
+  let lastScan = null;
+
+  function currentGroup() {
+    return location.pathname.match(/^\/groups\/([^/]+)/)?.[1];
+  }
+
+  // A group is reachable by numeric id and by vanity name; the page may use one while permalinks use the other.
+  function sameGroup(linkedGroup, declared) {
+    const group = currentGroup();
+    if (!group || linkedGroup === group || declared?.has(linkedGroup)) return true;
+    return /^\d+$/.test(group) !== /^\d+$/.test(linkedGroup);
+  }
+
+  // `declared` widens the group check to groups the post card itself names (its group avatar/name/author
+  // links); pages such as the mixed groups feed or search results show posts from groups other than the URL's.
+  function postUrl(href, declared) {
+    try {
+      const url = new URL(href, location.origin);
+      if (url.protocol !== "https:" || !["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname)) return null;
+      if (url.searchParams.has("comment_id") || url.searchParams.has("reply_comment_id")) return null;
+      const path = url.pathname.match(/^\/groups\/([^/]+)\/(?:posts|permalink)\/([a-zA-Z0-9]+)\/?$/);
+      if (path) {
+        if (!sameGroup(path[1], declared)) return null;
+        return `https://www.facebook.com/groups/${path[1]}/posts/${path[2]}/`;
+      }
+      const linkedGroup = url.pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1];
+      const postId = url.searchParams.get("multi_permalinks");
+      if (linkedGroup && sameGroup(linkedGroup, declared) && /^[a-zA-Z0-9]+$/.test(postId || "")) {
+        return `https://www.facebook.com/groups/${linkedGroup}/posts/${postId}/`;
+      }
+      const storyId = url.searchParams.get("story_fbid");
+      const owner = url.searchParams.get("id");
+      if (/^\/(?:permalink|story)\.php$/.test(url.pathname) && /^[a-zA-Z0-9]+$/.test(storyId || "") && /^\d+$/.test(owner || "")) {
+        return `https://www.facebook.com/permalink.php?story_fbid=${storyId}&id=${owner}`;
+      }
+      if (/^\/(?:(?:[^/]+\/)?posts|share\/p)\/[a-zA-Z0-9]+\/?$/.test(url.pathname)) {
+        return `https://www.facebook.com${url.pathname.replace(/\/?$/, "/")}`;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function isCommentArticle(article) {
+    return COMMENT_LABEL.test(article?.getAttribute("aria-label") || "");
+  }
+
+  function isComment(element) {
+    return isCommentArticle(element.closest(ARTICLE));
+  }
+
+  function belongsToPost(element, post) {
+    if (element.closest('form, [role="dialog"]') || isComment(element)) return false;
+    const article = element.closest(ARTICLE);
+    let primary = post.matches(ARTICLE) ? post : post.querySelector(ARTICLE);
+    const message = post.querySelector(MESSAGE);
+    if (message && !primary?.contains(message)) primary = null;
+    return !article || article === primary || !post.contains(article);
+  }
+
+  function declaredGroups(anchors) {
+    const groups = new Set();
+    for (const anchor of anchors) {
+      try {
+        const url = new URL(anchor.getAttribute("href"), location.origin);
+        const group = url.pathname.match(/^\/groups\/([^/]+)\/?(?:user\/\d+\/?)?$/)?.[1];
+        if (group && !url.searchParams.has("multi_permalinks")) groups.add(group);
+      } catch {
+        continue;
+      }
+    }
+    return groups;
+  }
+
+  function findPermalink(post) {
+    const anchors = [...post.querySelectorAll(LINK_WITH_HREF)].filter((anchor) => belongsToPost(anchor, post));
+    const pick = (declared) => {
+      for (const anchor of anchors) {
+        const url = postUrl(anchor.getAttribute("href"), declared);
+        if (url) return { url, label: anchor.getAttribute("aria-label") || "", foreign: Boolean(declared) };
+      }
+      return null;
+    };
+    return pick() || pick(declaredGroups(anchors));
+  }
+
+  function feedRoot() {
+    return document.querySelector('[role="feed"]') || document.querySelector('[role="main"], main') || document.body;
+  }
+
+  function messagesIn(post) {
+    const nodes = post.matches(MESSAGE) ? [post] : [...post.querySelectorAll(MESSAGE)];
+    return nodes.filter((node) => !node.parentElement.closest(MESSAGE) && belongsToPost(node, post));
+  }
+
+  function findCandidates() {
+    const root = feedRoot();
+    const candidates = new Set();
+    for (const unit of root.querySelectorAll('[data-pagelet^="FeedUnit"]')) {
+      if (!unit.parentElement.closest(`${ARTICLE}, [data-pagelet^="FeedUnit"]`) &&
+          (findText(unit) || findPermalink(unit))) candidates.add(unit);
+    }
+    for (const article of root.querySelectorAll(ARTICLE)) {
+      if (!article.parentElement.closest(ARTICLE) && !isComment(article) &&
+          ![...candidates].some((post) => post.contains(article)) &&
+          (findText(article) || findPermalink(article))) candidates.add(article);
+    }
+    const seeds = [
+      ...[...root.querySelectorAll(MESSAGE)].filter((node) => !node.parentElement.closest(MESSAGE)),
+      ...[...root.querySelectorAll(LINK_WITH_HREF)].filter((anchor) => postUrl(anchor.getAttribute("href"))),
+    ];
+    for (const seed of seeds) {
+      if (isComment(seed) || [...candidates].some((post) => post.contains(seed))) continue;
+      let candidate = seed.matches(MESSAGE) && findText(seed) ? seed : null;
+      for (let parent = seed.parentElement; parent && parent !== root; parent = parent.parentElement) {
+        if ([...candidates].some((post) => parent.contains(post))) break;
+        const messages = messagesIn(parent);
+        if (messages.length > 1) break;
+        const links = new Set([...parent.querySelectorAll(LINK_WITH_HREF)]
+          .filter((node) => belongsToPost(node, parent))
+          .map((node) => postUrl(node.getAttribute("href"))).filter(Boolean));
+        if (links.size > 1) break;
+        if (messages.length === 1 && findText(parent)) candidate = parent;
+        if (links.size === 1 && findText(parent)) {
+          candidate = parent;
+          break;
+        }
+      }
+      if (candidate) candidates.add(candidate);
+    }
+    return [...candidates].filter((post) => !post.closest('form, [role="dialog"]'));
+  }
+
+  function textOf(element) {
+    return element instanceof HTMLElement ? (element.innerText ?? element.textContent ?? "").trim() : "";
+  }
+
+  function findText(post) {
+    const message = messagesIn(post)[0];
+    if (message) return textOf(message);
+    const parts = [];
+    for (const node of post.querySelectorAll('[dir="auto"]')) {
+      if (!belongsToPost(node, post) || node.closest('[role="button"], button, a, [role="link"], h2, h3, h4, ul')) continue;
+      const text = textOf(node);
+      if (text && !parts.some((part) => part.includes(text))) parts.push(text);
+    }
+    return parts.join("\n");
+  }
+
+  function imageUrl(img) {
+    try {
+      const url = new URL(img.currentSrc || img.getAttribute("src") || "", location.origin);
+      if (url.protocol !== "https:" || !/(?:^|\.)fbcdn\.net$/.test(url.hostname) || url.hostname.startsWith("static.")) return null;
+      if (/emoji|\/rsrc\.php|\/images\//.test(url.pathname)) return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function findImages(post) {
+    const urls = [];
+    for (const img of post.querySelectorAll("img")) {
+      if (!belongsToPost(img, post) || img.closest('h2, h3, h4, button, [role="button"], svg')) continue;
+      const width = Number(img.getAttribute("width")) || img.width || img.naturalWidth;
+      const height = Number(img.getAttribute("height")) || img.height || img.naturalHeight;
+      if ((width && width < 100) || (height && height < 100)) continue;
+      const url = imageUrl(img);
+      if (url && !urls.includes(url)) urls.push(url);
+      if (urls.length >= MAX_IMAGES) break;
+    }
+    return urls;
+  }
+
+  function commentText(article) {
+    const parts = [];
+    for (const node of article.querySelectorAll(MESSAGE + ', [dir="auto"]')) {
+      if (node.closest(ARTICLE) !== article || node.closest('form, [role="button"], button, a, [role="link"], h2, h3, h4, ul, [aria-hidden="true"]')) continue;
+      const text = textOf(node);
+      if (text && !parts.some((part) => part.includes(text))) parts.push(text);
+    }
+    return parts.join("\n").slice(0, 600);
+  }
+
+  function findComments(post) {
+    const comments = [];
+    for (const article of post.querySelectorAll(ARTICLE)) {
+      if (!isCommentArticle(article) || article.closest('form, [role="dialog"]')) continue;
+      const text = commentText(article);
+      if (!text) continue;
+      const author = (article.getAttribute("aria-label") || "").replace(COMMENT_LABEL, "").replace(/^\s*(?:by|của|:)\s*/i, "").trim().slice(0, 80);
+      comments.push({ author, text });
+      if (comments.length >= MAX_COMMENTS) break;
+    }
+    return comments;
+  }
+
+  async function expandSeeMore(candidates, expanded) {
+    let clicked = false;
+    for (const post of candidates) {
+      for (const button of post.querySelectorAll('[role="button"], button')) {
+        if (!(button instanceof HTMLElement) || !belongsToPost(button, post) || expanded.has(button)) continue;
+        const label = textOf(button).toLocaleLowerCase().replace(/\s+/g, " ");
+        if (!["xem thêm", "see more", "더 보기"].includes(label)) continue;
+        expanded.add(button);
+        button.click();
+        clicked = true;
+      }
+    }
+    if (clicked) await sleep(400);
+  }
+
+  function headerLinks(post) {
+    const message = messagesIn(post)[0];
+    if (!message) return [];
+    return [...post.querySelectorAll(LINK)].filter((link) => {
+      if (!belongsToPost(link, post) || link.closest('h2, h3, h4, button, [role="button"]') ||
+          link.contains(message) || !(link.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+      try {
+        const url = new URL(link.getAttribute("href") || location.href, location.origin);
+        return url.protocol === "https:" && ["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname) &&
+          !url.searchParams.has("comment_id") && !url.searchParams.has("reply_comment_id");
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  async function revealPermalinks(candidates, activated, diagnostics) {
+    const links = candidates.filter((post) => !findPermalink(post))
+      .flatMap(headerLinks).filter((link) => link.isConnected && !activated.has(link)).slice(0, 20);
+    if (!links.length) return;
+    for (const link of links) {
+      activated.add(link);
+      diagnostics.linkActivations++;
+      link.dispatchEvent(new FocusEvent("focusin", { view: window, bubbles: true, cancelable: true }));
+    }
+    await sleep(600);
+    for (const link of links) {
+      if (link.isConnected) link.dispatchEvent(new FocusEvent("focusout", { view: window, bubbles: true }));
+    }
+  }
+
+  function collectPosts(candidates, posts, limit, diagnostics) {
+    let missingLinks = 0;
+    let missingText = 0;
+    let foreign = 0;
+    for (const post of candidates) {
+      const permalink = findPermalink(post);
+      const text = findText(post);
+      if (!permalink) missingLinks++;
+      else if (permalink.foreign) foreign++;
+      if (!text) missingText++;
+      if (!permalink || !text || posts.size >= limit) continue;
+      const previous = posts.get(permalink.url);
+      const images = findImages(post);
+      const comments = findComments(post);
+      if (previous && previous.text.length >= text.length && previous.images.length >= images.length &&
+          previous.comments.length >= comments.length) continue;
+      const author = [...post.querySelectorAll('h2, h3, h4, strong a, a[role="link"] strong')]
+        .find((node) => belongsToPost(node, post));
+      posts.set(permalink.url, {
+        id: permalink.url,
+        url: permalink.url,
+        author: textOf(author),
+        time: permalink.label,
+        text: text.slice(0, 4000),
+        images,
+        comments,
+      });
+    }
+    diagnostics.images = [...posts.values()].reduce((sum, item) => sum + item.images.length, 0);
+    diagnostics.comments = [...posts.values()].reduce((sum, item) => sum + item.comments.length, 0);
+    diagnostics.candidates = Math.max(diagnostics.candidates, candidates.length);
+    diagnostics.missingLinks = Math.max(diagnostics.missingLinks, missingLinks);
+    diagnostics.missingText = Math.max(diagnostics.missingText, missingText);
+    diagnostics.foreignGroupPosts = Math.max(diagnostics.foreignGroupPosts, foreign);
+  }
+
+  function scrollContainer() {
+    for (let node = feedRoot(); node && node !== document.body; node = node.parentElement) {
+      if (node.scrollHeight > node.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(node).overflowY)) return node;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function bounded(value, fallback, max) {
+    return Math.min(max, Math.max(1, Math.floor(Number(value) || fallback)));
+  }
+
+  function linkShape(href) {
+    if (!href) return { route: "missing" };
+    try {
+      const url = new URL(href, location.origin);
+      if (url.protocol !== "https:" || !["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname)) return { route: "external-or-non-https" };
+      let route = "other-facebook";
+      if (/^\/groups\/[^/]+\/(?:posts|permalink)\//.test(url.pathname)) route = "group-post";
+      else if (/^\/groups\/[^/]+\/search/.test(url.pathname)) route = "group-search";
+      else if (/^\/groups\/[^/]+/.test(url.pathname)) route = "group";
+      else if (/^\/(?:story|permalink)\.php$/.test(url.pathname)) route = "story";
+      else if (/^\/marketplace\//.test(url.pathname)) route = "marketplace";
+      else if (/^\/share\/p\//.test(url.pathname)) route = "share-post";
+      else if (/\/posts\//.test(url.pathname)) route = "profile-post";
+      const group = url.pathname.match(/^\/groups\/([^/]+)/)?.[1];
+      const publicSegments = ["groups", "posts", "permalink", "share", "p", "marketplace", "item", "photo", "photo.php", "videos", "watch", "story.php", "permalink.php", "search", "user", "profile.php"];
+      return {
+        route,
+        pathShape: url.pathname.split("/").filter(Boolean).map((part) => publicSegments.includes(part) ? part : /^\d+$/.test(part) ? ":number" : part.startsWith("pfbid") ? ":pfbid" : ":value"),
+        isFragmentLink: href.startsWith("#"),
+        accepted: Boolean(postUrl(href)),
+        sameGroup: group ? sameGroup(group) : null,
+        queryKeys: ["story_fbid", "id", "multi_permalinks", "comment_id", "reply_comment_id"].filter((key) => url.searchParams.has(key)),
+        hasFragment: Boolean(url.hash),
+      };
+    } catch {
+      return { route: "invalid" };
+    }
+  }
+
+  function describeNode(node) {
+    const roles = ["article", "feed", "main", "button", "link", "dialog", "heading", "list", "listitem"];
+    const role = node.getAttribute("role");
+    return {
+      tag: node.tagName.toLowerCase(),
+      role: roles.includes(role) ? role : role ? "other" : null,
+      pagelet: node.hasAttribute("data-pagelet") ? (node.getAttribute("data-pagelet").startsWith("FeedUnit") ? "FeedUnit" : "other") : null,
+      attributes: ["data-ad-preview", "data-ad-comet-preview", "data-ad-rendering-role", "aria-label", "aria-labelledby", "aria-posinset", "dir", "href"].filter((name) => node.hasAttribute(name)),
+      isMessage: node.matches(MESSAGE),
+      isComment: isComment(node),
+      isSeeMore: node.matches('[role="button"], button') && ["xem thêm", "see more", "더 보기"].includes(textOf(node).toLocaleLowerCase()),
+      isDirAuto: node.getAttribute("dir") === "auto",
+      hasLayout: node.getClientRects().length > 0,
+      insideFormOrDialog: Boolean(node.closest('form, [role="dialog"]')),
+      textLength: textOf(node).length,
+      link: node.matches('a, [role="link"]') ? linkShape(node.getAttribute("href")) : null,
+    };
+  }
+
+  function structure(root, limit = 160) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    const indexes = new Map();
+    const nodes = [];
+    let node = root;
+    while (node && nodes.length < limit) {
+      indexes.set(node, nodes.length);
+      nodes.push({ parent: indexes.get(node.parentElement) ?? null, belongsToCandidate: belongsToPost(node, root), ...describeNode(node) });
+      node = walker.nextNode();
+    }
+    return { nodes, truncated: Boolean(node) };
+  }
+
+  function selectorCounts(root) {
+    return {
+      articles: root.querySelectorAll(ARTICLE).length,
+      feedUnits: root.querySelectorAll('[data-pagelet^="FeedUnit"]').length,
+      messages: root.querySelectorAll(MESSAGE).length,
+      dirAuto: root.querySelectorAll('[dir="auto"]').length,
+      links: root.querySelectorAll(LINK_WITH_HREF).length,
+      linksWithoutHref: root.querySelectorAll('[role="link"]:not([href]), a:not([href])').length,
+      acceptedLinks: [...root.querySelectorAll(LINK_WITH_HREF)].filter((node) => postUrl(node.getAttribute("href"))).length,
+      images: root.querySelectorAll("img").length,
+      postImages: [...root.querySelectorAll("img")].filter((img) => imageUrl(img)).length,
+      commentArticles: [...root.querySelectorAll(ARTICLE)].filter(isCommentArticle).length,
+    };
+  }
+
+  function diagnose() {
+    const root = feedRoot();
+    const candidates = findCandidates();
+    const patterns = new Map();
+    for (const link of root.querySelectorAll(LINK)) {
+      const shape = linkShape(link.getAttribute("href"));
+      const key = JSON.stringify(shape);
+      patterns.set(key, { ...shape, count: (patterns.get(key)?.count || 0) + 1 });
+    }
+    return {
+      schemaVersion: 2,
+      extensionVersion: VERSION,
+      pageType: linkShape(location.href).route,
+      pagePath: linkShape(location.href).pathShape,
+      scanning,
+      lastScan,
+      documentCounts: selectorCounts(document),
+      selectedRoot: { node: describeNode(root), counts: selectorCounts(root) },
+      regions: [...document.querySelectorAll('main, [role="main"], [role="feed"]')].slice(0, 6)
+        .map((node) => ({ node: describeNode(node), counts: selectorCounts(node) })),
+      candidateCount: candidates.length,
+      linkPatterns: [...patterns.values()].slice(0, 40),
+      samples: (candidates.length ? candidates.slice(0, 3) : [root]).map((post) => ({
+        hasPermalink: Boolean(findPermalink(post)),
+        extractedTextLength: findText(post).length,
+        imageCount: findImages(post).length,
+        commentCount: findComments(post).length,
+        counts: selectorCounts(post),
+        links: [...post.querySelectorAll(LINK)].slice(0, 24).map(describeNode),
+        structure: structure(post),
+      })),
+    };
+  }
+
+  async function scanFeed(opts, onProgress) {
+    const maxPosts = bounded(opts.maxPosts, 60, 300);
+    const maxScrolls = bounded(opts.maxScrolls, 60, 120);
+    const posts = new Map();
+    const expanded = new WeakSet();
+    const activated = new WeakSet();
+    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, foreignGroupPosts: 0, images: 0, comments: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
+    lastScan = { maxPosts, maxScrolls, scanned: 0, ...diagnostics };
+    const startPath = location.pathname + location.search;
+    let previous = "";
+    let stalled = 0;
+
+    for (let pass = 0; pass <= maxScrolls; pass++) {
+      if (stopRequested) {
+        diagnostics.stopReason = "user-stopped";
+        break;
+      }
+      if (location.pathname + location.search !== startPath) throw new Error("Trang Facebook đã thay đổi. Hãy quét lại trên nhóm cần tìm.");
+      await expandSeeMore(findCandidates(), expanded);
+      if (!stopRequested) await revealPermalinks(findCandidates(), activated, diagnostics);
+      if (stopRequested) {
+        diagnostics.stopReason = "user-stopped";
+        break;
+      }
+      if (location.pathname + location.search !== startPath) throw new Error("Trang Facebook đã thay đổi. Hãy quét lại trên nhóm cần tìm.");
+      const candidates = findCandidates();
+      collectPosts(candidates, posts, maxPosts, diagnostics);
+      lastScan = { maxPosts, maxScrolls, scanned: posts.size, ...diagnostics };
+      onProgress({ scanned: posts.size, scroll: pass, ...diagnostics });
+      if (posts.size >= maxPosts) {
+        diagnostics.stopReason = "post-limit";
+        break;
+      }
+      if (posts.size === 0 && pass >= 12) {
+        diagnostics.stopReason = "no-readable-posts";
+        break;
+      }
+
+      const container = scrollContainer();
+      const viewport = container === document.scrollingElement ? window.innerHeight : container.clientHeight;
+      const atBottom = container.scrollTop + viewport >= container.scrollHeight - 4;
+      const signature = JSON.stringify([
+        container.scrollTop, container.scrollHeight,
+        candidates.map((post) => [findPermalink(post)?.url, textOf(post)]),
+      ]);
+      stalled = atBottom && signature === previous ? stalled + 1 : 0;
+      previous = signature;
+      if (stalled >= 6) {
+        diagnostics.stopReason = "feed-stalled";
+        break;
+      }
+      if (pass === maxScrolls) {
+        diagnostics.stopReason = "scroll-limit";
+        break;
+      }
+      const step = Math.max(400, Math.floor(viewport * 0.8));
+      if (container === document.scrollingElement || container === document.documentElement) {
+        window.scrollBy({ top: step, behavior: "instant" });
+      } else {
+        container.scrollTop += step;
+      }
+      diagnostics.scrolls++;
+      await sleep(1200);
+    }
+    lastScan = { maxPosts, maxScrolls, scanned: posts.size, ...diagnostics };
+    return { posts: [...posts.values()], diagnostics, canceled: stopRequested };
+  }
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type === "PING") {
+      sendResponse({ ok: true, version: VERSION, isGroup: /^\/groups\/[^/]+/.test(location.pathname), title: document.title });
+      return;
+    }
+    if (msg?.type === "DIAGNOSE") {
+      sendResponse({ ok: true, report: diagnose() });
+      return;
+    }
+    if (msg?.type === "STOP_SCAN") {
+      stopRequested = scanning;
+      sendResponse({ ok: true });
+      return;
+    }
+    if (msg?.type !== "SCAN") return;
+    if (scanning) {
+      sendResponse({ ok: false, error: "Tab này đang quét. Hãy chờ lượt quét hiện tại kết thúc." });
+      return;
+    }
+    scanning = true;
+    stopRequested = false;
+    scanFeed(msg.opts || {}, (progress) => chrome.runtime.sendMessage({ type: "SCAN_PROGRESS", ...progress }).catch(() => {}))
+      .then((result) => sendResponse({ ok: true, ...result, groupTitle: document.title, groupUrl: location.href }))
+      .catch((error) => {
+        lastScan = { ...lastScan, stopReason: "error" };
+        sendResponse({ ok: false, error: String(error) });
+      })
+      .finally(() => { scanning = false; });
+    return true;
+  });
+})();
