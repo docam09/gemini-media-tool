@@ -136,30 +136,125 @@ async function callGemini({ apiKey, model, query, posts }) {
     });
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type !== "FILTER") return;
-  (async () => {
-    const settings = await chrome.storage.sync.get(["geminiApiKey", "geminiModel", "readImages", "readComments"]);
-    const { geminiApiKey, geminiModel } = settings;
-    if (!geminiApiKey) throw new Error("Chưa nhập Gemini API key (mở phần Cài đặt).");
-    const model = resolveModel(geminiModel);
-    if (model !== geminiModel) await chrome.storage.sync.set({ geminiModel: model });
-    const readImages = settings.readImages !== false;
-    const readComments = settings.readComments !== false;
-    const posts = msg.posts.map((post) => ({
-      ...post,
-      images: readImages && Array.isArray(post.images) ? post.images : [],
-      comments: readComments && Array.isArray(post.comments) ? post.comments : [],
+async function filterPosts(query, rawPosts) {
+  const settings = await chrome.storage.sync.get(["geminiApiKey", "geminiModel", "readImages", "readComments"]);
+  const { geminiApiKey, geminiModel } = settings;
+  if (!geminiApiKey) throw new Error("Chưa nhập Gemini API key (mở phần Cài đặt).");
+  const model = resolveModel(geminiModel);
+  if (model !== geminiModel) await chrome.storage.sync.set({ geminiModel: model });
+  const readImages = settings.readImages !== false;
+  const readComments = settings.readComments !== false;
+  const posts = rawPosts.map((post) => ({
+    ...post,
+    images: readImages && Array.isArray(post.images) ? post.images : [],
+    comments: readComments && Array.isArray(post.comments) ? post.comments : [],
+  }));
+  const stats = { imagesSent: 0, imagesSkipped: 0, comments: posts.reduce((sum, post) => sum + post.comments.length, 0) };
+  const chunk = posts.some((post) => post.images.length) ? IMAGE_BATCH : TEXT_BATCH;
+  const all = [];
+  for (let i = 0; i < posts.length; i += chunk) {
+    const part = await attachImages(posts.slice(i, i + chunk), stats);
+    all.push(...(await callGemini({ apiKey: geminiApiKey, model, query, posts: part })));
+  }
+  all.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return { results: all, stats };
+}
+
+// The whole scan+filter job runs here and its state lives in chrome.storage.local, so closing the
+// popup (switching tabs) neither aborts the job nor loses the results.
+const JOB_KEY = "job";
+const JOB_STALE_MS = 2 * 60 * 1000;
+const KEEP_ALIVE_MS = 20 * 1000;
+const RUNNING = ["scanning", "filtering"];
+
+async function getJob() {
+  return (await chrome.storage.local.get(JOB_KEY))[JOB_KEY] || null;
+}
+
+let jobQueue = Promise.resolve();
+
+function writeJob(compute) {
+  const next = jobQueue.then(async () => {
+    const current = await getJob();
+    const updated = compute(current);
+    if (!updated) return current;
+    const job = { ...updated, updatedAt: Date.now() };
+    await chrome.storage.local.set({ [JOB_KEY]: job });
+    return job;
+  });
+  jobQueue = next.catch(() => {});
+  return next;
+}
+
+const patchJob = (patch) => writeJob((job) => ({ ...(job || {}), ...patch }));
+
+function isRunning(job) {
+  return !!job && RUNNING.includes(job.state) && Date.now() - (job.updatedAt || 0) < JOB_STALE_MS;
+}
+
+async function runJob({ tabId, query, maxPosts, maxScrolls, groupTitle }) {
+  const keepAlive = setInterval(() => patchJob({}).catch(() => {}), KEEP_ALIVE_MS);
+  try {
+    await writeJob(() => ({
+      state: "scanning", tabId, query, groupTitle, maxPosts, startedAt: Date.now(),
+      status: "Đang đọc Facebook. Chưa gọi Gemini.", results: [],
     }));
-    const stats = { imagesSent: 0, imagesSkipped: 0, comments: posts.reduce((sum, post) => sum + post.comments.length, 0) };
-    const chunk = posts.some((post) => post.images.length) ? IMAGE_BATCH : TEXT_BATCH;
-    const all = [];
-    for (let i = 0; i < posts.length; i += chunk) {
-      const part = await attachImages(posts.slice(i, i + chunk), stats);
-      all.push(...(await callGemini({ apiKey: geminiApiKey, model, query: msg.query, posts: part })));
+    const scan = await chrome.tabs.sendMessage(tabId, { type: "SCAN", opts: { maxPosts, maxScrolls } });
+    if (!scan?.ok) throw new Error(scan?.error || "Quét thất bại");
+    if (scan.canceled) {
+      await patchJob({ state: "done", status: `Đã dừng quét (${scan.posts.length} bài đã đọc). Chưa gọi Gemini.`, results: [], finishedAt: Date.now() });
+      return;
     }
-    all.sort((a, b) => (b.score || 0) - (a.score || 0));
-    sendResponse({ ok: true, results: all, stats });
-  })().catch((e) => sendResponse({ ok: false, error: e.message || String(e) }));
-  return true;
+    if (!scan.posts.length) {
+      const d = scan.diagnostics;
+      const detail = d ? ` Nhận diện ${d.candidates} khung bài; ${d.missingLinks} thiếu link, ${d.missingText} thiếu nội dung; đã cuộn ${d.scrolls} lần.` : "";
+      throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Gemini chưa được gọi. Nếu vừa cập nhật extension, hãy tải lại tab Facebook. Bấm “Tải chẩn đoán” và gửi báo cáo để kiểm tra cấu trúc trang.`);
+    }
+    const d = scan.diagnostics || {};
+    await patchJob({ state: "filtering", scanned: scan.posts.length, status: `Đã đọc ${scan.posts.length} bài (${d.images || 0} ảnh, ${d.comments || 0} bình luận). Đang tải ảnh và nhờ Gemini lọc...` });
+    const { results, stats } = await filterPosts(query, scan.posts);
+    const skipped = stats.imagesSkipped ? `, bỏ ${stats.imagesSkipped} ảnh không tải được` : "";
+    await patchJob({
+      state: "done", results, stats, finishedAt: Date.now(),
+      status: `Xong: ${results.length}/${scan.posts.length} bài phù hợp (Gemini đã xem ${stats.imagesSent || 0} ảnh, ${stats.comments || 0} bình luận${skipped}).`,
+    });
+  } catch (e) {
+    await patchJob({ state: "error", error: e.message || String(e), status: "", finishedAt: Date.now() });
+  } finally {
+    clearInterval(keepAlive);
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "FILTER") {
+    filterPosts(msg.query, msg.posts)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((e) => sendResponse({ ok: false, error: e.message || String(e) }));
+    return true;
+  }
+  if (msg?.type === "RUN") {
+    getJob().then((job) => {
+      if (isRunning(job)) {
+        sendResponse({ ok: false, error: "Đang có lượt quét chạy. Bấm Dừng hoặc chờ lượt quét kết thúc." });
+        return;
+      }
+      runJob(msg);
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+  if (msg?.type === "STOP") {
+    getJob()
+      .then((job) => (isRunning(job) && job.tabId ? chrome.tabs.sendMessage(job.tabId, { type: "STOP_SCAN" }) : null))
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message || String(e) }));
+    return true;
+  }
+  if (msg?.type === "SCAN_PROGRESS" && sender?.tab?.id) {
+    writeJob((job) => job?.state === "scanning" && job.tabId === sender.tab.id ? {
+      ...job,
+      scanned: msg.scanned,
+      status: `Đọc Facebook: ${msg.scanned} bài (${msg.images || 0} ảnh, ${msg.comments || 0} bình luận) · ${msg.candidates || 0} khung · thiếu link ${msg.missingLinks || 0}, thiếu nội dung ${msg.missingText || 0} · cuộn ${msg.scroll}. Chưa gọi Gemini.`,
+    } : null).catch(() => {});
+  }
 });

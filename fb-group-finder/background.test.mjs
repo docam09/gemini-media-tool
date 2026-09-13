@@ -6,16 +6,25 @@ const post = (id) => ({ url: `https://www.facebook.com/groups/123/posts/${id}/`,
 const success = (results = [{ index: 0, score: 0.9, summary: "Phù hợp", extracted: { price: "900k" } }]) =>
   new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ results }) }] } }] }));
 
-async function fixture(t, settings = {}, respond = () => success()) {
+async function fixture(t, settings = {}, respond = () => success(), tabReply = async () => ({ ok: true, posts: [] })) {
   const storage = { geminiApiKey: "test-api-key", ...settings };
+  const local = {};
   const requests = [];
+  const tabMessages = [];
   let listener;
   globalThis.chrome = {
-    storage: { sync: {
-      get: async () => ({ ...storage }),
-      set: async (values) => { Object.assign(storage, values); },
-    } },
+    storage: {
+      sync: {
+        get: async () => ({ ...storage }),
+        set: async (values) => { Object.assign(storage, values); },
+      },
+      local: {
+        get: async (key) => (key in local ? { [key]: structuredClone(local[key]) } : {}),
+        set: async (values) => { Object.assign(local, structuredClone(values)); },
+      },
+    },
     runtime: { onMessage: { addListener: (fn) => { listener = fn; } } },
+    tabs: { sendMessage: async (tabId, message) => { tabMessages.push({ tabId, message }); return tabReply(message, tabId); } },
   };
   t.after(() => { delete globalThis.chrome; });
   t.mock.method(globalThis, "fetch", async (url, options = {}) => {
@@ -24,12 +33,23 @@ async function fixture(t, settings = {}, respond = () => success()) {
     return respond(request, requests.length);
   });
   await import(`./background.js?test=${++sequence}`);
+  const send = (message, sender = {}) => new Promise((resolve) => {
+    assert.equal(listener(message, sender, resolve), true);
+  });
+  const settled = async () => {
+    for (let i = 0; i < 100 && (!local.job || ["scanning", "filtering"].includes(local.job.state)); i++) await new Promise((r) => setTimeout(r, 5));
+    return local.job;
+  };
   return {
     storage,
+    local,
     requests,
-    filter: (posts = [post(1)]) => new Promise((resolve) => {
-      assert.equal(listener({ type: "FILTER", query: "Tiger dưới 1 triệu", posts }, {}, resolve), true);
-    }),
+    tabMessages,
+    send,
+    notify: (message, sender) => { listener(message, sender, () => {}); },
+    settled,
+    filter: (posts = [post(1)]) => send({ type: "FILTER", query: "Tiger dưới 1 triệu", posts }),
+    run: (extra = {}) => send({ type: "RUN", tabId: 5, query: "Tiger dưới 1 triệu", maxPosts: 2, maxScrolls: 6, groupTitle: "Nhóm test", ...extra }),
   };
 }
 
@@ -169,4 +189,93 @@ test("uses one resolved model across batches and maps batch-local indices to ori
   assert.deepEqual(result.results.map((p) => p.url), [post(25).url, post(24).url]);
   assert.equal(f.requests.length, 2);
   assert.ok(f.requests.every((r) => r.url.endsWith("/gemini-3.6-flash:generateContent")));
+});
+
+test("runs the scan and Gemini filter as a background job whose results persist in storage", async (t) => {
+  const scanned = [{ ...post(1), images: [], comments: [{ author: "A", text: "850k" }] }];
+  const f = await fixture(t, {}, () => success(), async (message) => {
+    assert.equal(message.type, "SCAN");
+    assert.deepEqual(message.opts, { maxPosts: 2, maxScrolls: 6 });
+    return { ok: true, posts: scanned, diagnostics: { images: 0, comments: 1 } };
+  });
+  assert.deepEqual(await f.run(), { ok: true });
+  const job = await f.settled();
+  assert.equal(job.state, "done");
+  assert.equal(job.query, "Tiger dưới 1 triệu");
+  assert.equal(job.groupTitle, "Nhóm test");
+  assert.equal(job.tabId, 5);
+  assert.deepEqual(job.results.map((r) => r.url), [post(1).url]);
+  assert.equal(job.results[0].extracted.price, "900k");
+  assert.match(job.status, /Xong: 1\/1 bài phù hợp/);
+  assert.match(job.status, /1 bình luận/);
+  assert.ok(job.finishedAt >= job.startedAt);
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(f.tabMessages.map((m) => m.tabId), [5]);
+});
+
+test("records scanner diagnostics as a job error without calling Gemini when no post was extracted", async (t) => {
+  const f = await fixture(t, {}, () => success(), async () => ({
+    ok: true, posts: [], diagnostics: { candidates: 8, missingLinks: 8, missingText: 2, scrolls: 12 },
+  }));
+  await f.run();
+  const job = await f.settled();
+  assert.equal(job.state, "error");
+  assert.match(job.error, /8 khung bài/);
+  assert.match(job.error, /8 thiếu link, 2 thiếu nội dung/);
+  assert.match(job.error, /12 lần/);
+  assert.equal(f.requests.length, 0);
+});
+
+test("a stopped scan finishes without Gemini and a failed scan surfaces its error", async (t) => {
+  const f = await fixture(t, {}, () => success(), async () => ({ ok: true, canceled: true, posts: [post(1)] }));
+  await f.run();
+  let job = await f.settled();
+  assert.equal(job.state, "done");
+  assert.deepEqual(job.results, []);
+  assert.match(job.status, /Đã dừng quét \(1 bài đã đọc\)/);
+  assert.equal(f.requests.length, 0);
+
+  const g = await fixture(t, {}, () => success(), async () => { throw new Error("Could not establish connection"); });
+  await g.run();
+  job = await g.settled();
+  assert.equal(job.state, "error");
+  assert.match(job.error, /Could not establish connection/);
+});
+
+test("reports scan progress only for the scanning tab, refuses a second job and forwards Stop", async (t) => {
+  let finishScan;
+  const f = await fixture(t, {}, () => success(), async (message) => {
+    if (message.type === "STOP_SCAN") { finishScan({ ok: true, canceled: true, posts: [] }); return { ok: true }; }
+    return new Promise((resolve) => { finishScan = resolve; });
+  });
+  await f.run();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(f.local.job.state, "scanning");
+  f.notify({ type: "SCAN_PROGRESS", scanned: 3, scroll: 2, candidates: 4 }, { tab: { id: 5 } });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.match(f.local.job.status, /3 bài .*4 khung .*cuộn 2/);
+  const before = f.local.job.status;
+  f.notify({ type: "SCAN_PROGRESS", scanned: 9, scroll: 9 }, { tab: { id: 7 } });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(f.local.job.status, before);
+
+  const rejected = await f.run({ tabId: 7 });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /Đang có lượt quét/);
+  assert.equal(f.tabMessages.filter((m) => m.message.type === "SCAN").length, 1);
+
+  assert.deepEqual(await f.send({ type: "STOP" }), { ok: true });
+  assert.deepEqual(f.tabMessages.at(-1), { tabId: 5, message: { type: "STOP_SCAN" } });
+  const job = await f.settled();
+  assert.equal(job.state, "done");
+  assert.equal(f.requests.length, 0);
+});
+
+test("a job left running by a dead service worker is treated as stale and can be replaced", async (t) => {
+  const f = await fixture(t, {}, () => success(), async () => ({ ok: true, posts: [post(2)] }));
+  f.local.job = { state: "filtering", tabId: 9, updatedAt: Date.now() - 3 * 60 * 1000 };
+  assert.deepEqual(await f.run(), { ok: true });
+  const job = await f.settled();
+  assert.equal(job.state, "done");
+  assert.equal(job.tabId, 5);
 });

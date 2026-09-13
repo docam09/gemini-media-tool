@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.2.1**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.2.2**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -73,6 +73,15 @@ Báo cáo chẩn đoán từ bản 0.2.0: 11 khung bài, mỗi khung đều có 
 
 - Một nhóm có thể được gọi bằng số ID hoặc tên rút gọn. Link bài được chấp nhận khi hai định danh trùng nhau, hoặc khi một bên là số và bên kia là tên. Hai số khác nhau hoặc hai tên khác nhau vẫn bị coi là nhóm khác.
 - Chẩn đoán `sameGroup` dùng cùng quy tắc.
+
+### Bản 0.2.2: kết quả được giữ lại khi đóng popup hoặc chuyển tab
+
+Popup của Chrome bị đóng ngay khi bấm ra ngoài hoặc chuyển tab; trước đây toàn bộ lượt quét chạy trong popup nên vừa mất kết quả, vừa bỏ dở việc gọi Gemini.
+
+- Lượt quét + lọc chạy trong service worker (`background.js`) và trạng thái được ghi vào `chrome.storage.local` (`job`: đang đọc / đang lọc / xong / lỗi, tiến trình, kết quả). Popup chỉ hiển thị trạng thái đó và cập nhật theo `storage.onChanged`, nên có thể đóng popup, chuyển tab rồi mở lại vẫn thấy tiến trình hoặc kết quả kèm câu hỏi và thời điểm.
+- Nút **Xóa kết quả** xóa `job` đã lưu. Kết quả chỉ nằm trên máy người dùng và chỉ giữ một lượt quét gần nhất.
+- Chỉ chạy một lượt quét tại một thời điểm; **Dừng** gửi yêu cầu dừng tới tab đang quét. Lượt quét không cập nhật trong 2 phút (trình duyệt khởi động lại, tab đóng) được coi là gián đoạn và cho phép quét lại.
+- Service worker được giữ sống bằng cách ghi mốc thời gian mỗi 20 giây trong lúc quét; content script vẫn gửi tiến trình mỗi lượt cuộn.
 
 ## Kiểm tra mã nguồn
 

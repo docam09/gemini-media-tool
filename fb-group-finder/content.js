@@ -7,7 +7,7 @@
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
   const LINK = 'a, [role="link"]';
   const LINK_WITH_HREF = 'a[href], [role="link"][href]';
-  const VERSION = "0.2.1";
+  const VERSION = "0.2.2";
   const MAX_IMAGES = 4;
   const MAX_COMMENTS = 12;
   const COMMENT_LABEL = /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i;

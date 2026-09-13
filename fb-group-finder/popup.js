@@ -9,24 +9,57 @@ const runButton = document.querySelector("#run");
 const stopButton = document.querySelector("#stop");
 /** @type {HTMLButtonElement} */
 const diagnoseButton = document.querySelector("#diagnose");
+const RUNNING = ["scanning", "filtering"];
+const JOB_STALE_MS = 2 * 60 * 1000;
 let lastResults = [];
-let scanningTabId = null;
 
 $("openOptions").onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
 
-chrome.storage.local.get(["lastQuery", "maxPosts"]).then((s) => {
+// The scan/filter job runs in the background service worker and is mirrored into
+// chrome.storage.local ("job"), so the popup only displays that state and survives being closed.
+chrome.storage.local.get(["lastQuery", "maxPosts", "job"]).then((s) => {
   if (s.lastQuery) queryInput.value = s.lastQuery;
   if (s.maxPosts) maxPostsInput.value = s.maxPosts;
+  show(s.job);
 });
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg?.type !== "SCAN_PROGRESS") return;
-  $("status").textContent = `Đọc Facebook: ${msg.scanned} bài (${msg.images || 0} ảnh, ${msg.comments || 0} bình luận) · ${msg.candidates || 0} khung · thiếu link ${msg.missingLinks || 0}, thiếu nội dung ${msg.missingText || 0} · cuộn ${msg.scroll}. Chưa gọi Gemini.`;
-  if (sender?.tab?.id) {
-    scanningTabId = sender.tab.id;
-    stopButton.disabled = false;
-  }
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.job) show(changes.job.newValue);
 });
+
+function isRunning(job) {
+  return !!job && RUNNING.includes(job.state) && Date.now() - (job.updatedAt || 0) < JOB_STALE_MS;
+}
+
+function isStale(job) {
+  return !!job && RUNNING.includes(job.state) && !isRunning(job);
+}
+
+function when(ts) {
+  return ts ? new Date(ts).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "";
+}
+
+function show(job) {
+  const running = isRunning(job);
+  runButton.disabled = running;
+  stopButton.disabled = !running;
+  $("status").textContent = isStale(job) ? "" : job?.status || "";
+  $("error").textContent = job?.state === "error"
+    ? job.error || ""
+    : isStale(job) ? "Lượt quét trước bị gián đoạn (tab Facebook đóng hoặc trình duyệt khởi động lại). Hãy quét lại." : "";
+  lastResults = job?.state === "done" && Array.isArray(job.results) ? job.results : [];
+  const header = $("resultsHeader");
+  if (job?.state === "done") {
+    header.textContent = `Kết quả cho “${job.query || ""}”${job.groupTitle ? " · " + job.groupTitle : ""}${job.finishedAt ? " · " + when(job.finishedAt) : ""}`;
+    header.style.display = "block";
+    render(lastResults);
+  } else {
+    header.style.display = "none";
+    $("results").innerHTML = "";
+  }
+  $("tools").style.display = lastResults.length ? "flex" : "none";
+  $("clear").style.display = job && !running ? "inline-block" : "none";
+}
 
 async function getTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -47,12 +80,8 @@ async function ensureContent(tabId) {
 
 stopButton.onclick = async () => {
   stopButton.disabled = true;
-  try {
-    const tabId = scanningTabId ?? (await getTab())?.id;
-    if (tabId) await chrome.tabs.sendMessage(tabId, { type: "STOP_SCAN" });
-  } catch {
-    $("error").textContent = "Không liên lạc được với tab Facebook. Bấm F5 trên tab để dừng quét.";
-  }
+  const reply = await chrome.runtime.sendMessage({ type: "STOP" }).catch(() => null);
+  if (!reply?.ok) $("error").textContent = "Không liên lạc được với tab Facebook. Bấm F5 trên tab để dừng quét.";
 };
 
 function download(blob, filename) {
@@ -114,8 +143,6 @@ runButton.onclick = async () => {
   const maxPosts = Math.min(300, Math.max(1, Math.floor(Number(maxPostsInput.value) || 60)));
   maxPostsInput.value = String(maxPosts);
   $("error").textContent = "";
-  $("results").innerHTML = "";
-  $("tools").style.display = "none";
   if (!query) { $("error").textContent = "Nhập yêu cầu tìm kiếm trước."; return; }
   chrome.storage.local.set({ lastQuery: query, maxPosts });
 
@@ -128,41 +155,21 @@ runButton.onclick = async () => {
   try {
     const ping = await ensureContent(tab.id);
     if (!ping?.isGroup) throw new Error("Hãy mở trang một nhóm Facebook rồi quét lại.");
-    scanningTabId = tab.id;
-    stopButton.disabled = false;
-    $("status").textContent = "Đang đọc Facebook. Chưa gọi Gemini.";
-
-    const scan = await chrome.tabs.sendMessage(tab.id, { type: "SCAN", opts: { maxPosts, maxScrolls: Math.max(6, Math.min(120, maxPosts * 2)) } });
-    stopButton.disabled = true;
-    if (!scan?.ok) throw new Error(scan?.error || "Quét thất bại");
-    if (scan.canceled) {
-      $("status").textContent = `Đã dừng quét (${scan.posts.length} bài đã đọc). Chưa gọi Gemini.`;
-      return;
-    }
-    if (!scan.posts.length) {
-      const d = scan.diagnostics;
-      const detail = d ? ` Nhận diện ${d.candidates} khung bài; ${d.missingLinks} thiếu link, ${d.missingText} thiếu nội dung; đã cuộn ${d.scrolls} lần.` : "";
-      throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Gemini chưa được gọi. Nếu vừa cập nhật extension, hãy tải lại tab Facebook. Bấm “Tải chẩn đoán” và gửi báo cáo để kiểm tra cấu trúc trang.`);
-    }
-    const d = scan.diagnostics || {};
-    $("status").textContent = `Đã đọc ${scan.posts.length} bài (${d.images || 0} ảnh, ${d.comments || 0} bình luận). Đang tải ảnh và nhờ Gemini lọc...`;
-
-    const filt = await chrome.runtime.sendMessage({ type: "FILTER", query, posts: scan.posts });
-    if (!filt?.ok) throw new Error(filt?.error || "Lọc thất bại");
-    lastResults = filt.results;
-    const stats = filt.stats || {};
-    const skipped = stats.imagesSkipped ? `, bỏ ${stats.imagesSkipped} ảnh không tải được` : "";
-    $("status").textContent = `Xong: ${filt.results.length}/${scan.posts.length} bài phù hợp (Gemini đã xem ${stats.imagesSent || 0} ảnh, ${stats.comments || 0} bình luận${skipped}).`;
-    render(filt.results);
-    $("tools").style.display = filt.results.length ? "flex" : "none";
+    const reply = await chrome.runtime.sendMessage({
+      type: "RUN", tabId: tab.id, query, maxPosts, groupTitle: ping.title || "",
+      maxScrolls: Math.max(6, Math.min(120, maxPosts * 2)),
+    });
+    if (!reply?.ok) throw new Error(reply?.error || "Không khởi động được lượt quét.");
+    $("status").textContent = "Đang đọc Facebook. Có thể đóng popup hoặc chuyển tab; kết quả được giữ lại.";
   } catch (e) {
     $("error").textContent = e.message || String(e);
-    $("status").textContent = "";
-  } finally {
     runButton.disabled = false;
-    stopButton.disabled = true;
-    scanningTabId = null;
   }
+};
+
+$("clear").onclick = async () => {
+  await chrome.storage.local.remove("job");
+  show(null);
 };
 
 $("copy").onclick = () => {
