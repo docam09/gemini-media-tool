@@ -4,10 +4,16 @@ import { resolveModel } from "./gemini-model.js";
 const keyInput = document.querySelector("#key");
 /** @type {HTMLInputElement} */
 const modelInput = document.querySelector("#model");
+/** @type {HTMLInputElement} */
+const readImagesInput = document.querySelector("#readImages");
+/** @type {HTMLInputElement} */
+const readCommentsInput = document.querySelector("#readComments");
 
-chrome.storage.sync.get(["geminiApiKey", "geminiModel"]).then((s) => {
+chrome.storage.sync.get(["geminiApiKey", "geminiModel", "readImages", "readComments"]).then((s) => {
   if (s.geminiApiKey) keyInput.value = s.geminiApiKey;
   modelInput.value = resolveModel(s.geminiModel);
+  readImagesInput.checked = s.readImages !== false;
+  readCommentsInput.checked = s.readComments !== false;
 }).catch((e) => { document.getElementById("msg").textContent = e.message; });
 document.getElementById("save").onclick = async () => {
   try {
@@ -15,6 +21,8 @@ document.getElementById("save").onclick = async () => {
     await chrome.storage.sync.set({
       geminiApiKey: keyInput.value.trim(),
       geminiModel,
+      readImages: readImagesInput.checked,
+      readComments: readCommentsInput.checked,
     });
     modelInput.value = geminiModel;
     document.getElementById("msg").textContent = "Đã lưu.";

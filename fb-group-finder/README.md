@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.1.4**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.2.0**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -48,7 +48,7 @@ Báo cáo từ nhóm đang lỗi có 7 vùng nội dung nhưng 2 khung `article`
 - Đọc cả link có `role="link"`. Chỉ đưa bài có link được xác thực vào Gemini; nếu Facebook vẫn không cung cấp permalink thì ghi rõ thiếu link.
 - Chẩn đoán bổ sung các dạng link trong feed và mẫu link bên trong khung bài, kể cả khi cây cấu trúc bị cắt ở 160 phần tử. URL và định danh vẫn được ẩn. Nếu vẫn lỗi, bấm **Tải chẩn đoán** sau khi quét rồi gửi báo cáo mới.
 
-Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không đọc nội dung nằm hoàn toàn trong ảnh, không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được và yêu cầu tìm kiếm được gửi tới Gemini để lọc.
+Chỉ bài có nội dung chữ và link được đưa vào lọc. Extension không tự tìm tất cả các nhóm đã tham gia. Nội dung bài đọc được, ảnh trong bài, bình luận đang hiển thị và yêu cầu tìm kiếm được gửi tới Gemini để lọc (xem bản 0.2.0).
 
 ### Bản 0.1.4: Gemini báo 404 cho model cũ
 
@@ -57,6 +57,15 @@ Lỗi `models/gemini-2.5-flash is no longer available to new users` xuất hiệ
 - Cấu hình `gemini-2.5-flash` đã lưu tự chuyển sang `gemini-3.6-flash` khi lọc; không cần nhập lại API key. Model tùy chọn khác được giữ nguyên.
 - Vẫn dùng `generateContent` và JSON output. Bỏ cấu hình `thinkingBudget: 0` dành cho model cũ để dùng cấu hình thinking mặc định của model.
 - Cài đặt cho phép nhập mã model khác, kể cả dạng `models/<mã model>`. Nếu gặp 404, thông báo hướng dẫn đổi model. Không tự thử nhiều model hoặc chuyển sang Pro.
+
+### Bản 0.2.0: đọc ảnh và bình luận
+
+- **Ảnh trong bài**: lấy tối đa 4 ảnh mỗi bài từ `img` thuộc khung bài, chỉ nhận ảnh trên `*.fbcdn.net` (bỏ `static.*`, emoji, icon, `rsrc.php`), bỏ ảnh nhỏ hơn 100px (avatar), ảnh trong tiêu đề/nút và ảnh nằm trong bình luận; ảnh trùng URL chỉ lấy một lần. Service worker tải ảnh (quyền `https://*.fbcdn.net/*`, không gửi cookie), bỏ ảnh lỗi, không phải JPEG/PNG/WebP/GIF, lớn hơn 4 MB hoặc vượt 12 MB mỗi lô, rồi gửi kèm dạng `inlineData` có nhãn chỉ số bài. Lô có ảnh giảm còn 8 bài; lô chỉ chữ vẫn 25 bài. Popup báo số ảnh Gemini đã xem và số ảnh bỏ qua.
+- **Bình luận đang hiển thị**: lấy tối đa 12 bình luận (kể cả phản hồi) từ các `article` có `aria-label` dạng “Bình luận của…”/“Comment by…” nằm trong khung bài; mỗi bình luận gồm tên (từ `aria-label`) và chữ, tối đa 600 ký tự, không lấy nút, link, ô nhập bình luận hay “Xem thêm bình luận”. Extension không tự mở thêm bình luận; chỉ đọc những gì Facebook đang hiển thị. Bình luận được gửi tách riêng khỏi nội dung bài; link kết quả vẫn là link bài gốc, không phải link bình luận.
+- Gemini được yêu cầu ghi trong tóm tắt nếu thông tin lấy từ ảnh hoặc bình luận. Kết quả và CSV kèm số ảnh và danh sách bình luận đã đọc.
+- Cài đặt có hai ô **Đọc ảnh trong bài** và **Đọc bình luận đang hiển thị** (mặc định bật). Tắt đọc ảnh để tiết kiệm token và thời gian.
+- Chẩn đoán chỉ ghi số ảnh và số bình luận của mỗi khung, không ghi URL ảnh, tên hay nội dung bình luận.
+- Đã gọi thử Gemini thực với ảnh bảng giá mô phỏng: model đọc được giá và số điện thoại trên ảnh. Cách nhận diện ảnh/bình luận trong DOM Facebook thực tế chưa được xác nhận; nếu popup báo 0 ảnh/0 bình luận trong khi bài có, bấm **Tải chẩn đoán** và gửi báo cáo.
 
 ## Kiểm tra mã nguồn
 
@@ -81,7 +90,7 @@ Kiểm thử dùng DOM giả lập, bao gồm feed tải chậm, bài không có
 ## Cấu trúc
 
 - `manifest.json` – MV3 manifest.
-- `content.js` – cuộn feed, bung "Xem thêm", trích xuất bài (`author`, `time`, `text`, `url`).
-- `background.js` – gọi Gemini (`generateContent`, JSON output, chia lô 25 bài) để chấm điểm/lọc/trích xuất.
+- `content.js` – cuộn feed, bung "Xem thêm", trích xuất bài (`author`, `time`, `text`, `url`, `images`, `comments`).
+- `background.js` – tải ảnh bài, gọi Gemini (`generateContent`, JSON output, chia lô 25 bài hoặc 8 bài khi có ảnh) để chấm điểm/lọc/trích xuất.
 - `popup.html/js` – giao diện nhập yêu cầu và hiển thị kết quả.
-- `options.html/js` – lưu API key và model vào `chrome.storage.sync`.
+- `options.html/js` – lưu API key, model và tuù chọn đọc ảnh/bình luận vào `chrome.storage.sync`.

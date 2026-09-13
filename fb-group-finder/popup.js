@@ -21,7 +21,7 @@ chrome.storage.local.get(["lastQuery", "maxPosts"]).then((s) => {
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type !== "SCAN_PROGRESS") return;
-  $("status").textContent = `Đọc Facebook: ${msg.scanned} bài · ${msg.candidates || 0} khung · thiếu link ${msg.missingLinks || 0}, thiếu nội dung ${msg.missingText || 0} · cuộn ${msg.scroll}. Chưa gọi Gemini.`;
+  $("status").textContent = `Đọc Facebook: ${msg.scanned} bài (${msg.images || 0} ảnh, ${msg.comments || 0} bình luận) · ${msg.candidates || 0} khung · thiếu link ${msg.missingLinks || 0}, thiếu nội dung ${msg.missingText || 0} · cuộn ${msg.scroll}. Chưa gọi Gemini.`;
   if (sender?.tab?.id) {
     scanningTabId = sender.tab.id;
     stopButton.disabled = false;
@@ -91,14 +91,20 @@ function render(results) {
   if (!results.length) { box.innerHTML = "<p>Không tìm thấy bài phù hợp.</p>"; return; }
   for (const r of results) {
     const ex = Object.entries(r.extracted || {}).map(([k, v]) => `<span><b>${esc(k)}</b>: ${esc(v)}</span>`).join("");
+    const images = Array.isArray(r.images) ? r.images : [];
+    const comments = Array.isArray(r.comments) ? r.comments : [];
+    const media = [images.length ? `${images.length} ảnh` : "", comments.length ? `${comments.length} bình luận` : ""].filter(Boolean).join(", ");
+    const commentList = comments.length
+      ? `<details><summary>Bình luận (${comments.length})</summary><pre>${comments.map((c) => esc((c.author ? c.author + ": " : "") + c.text)).join("\n")}</pre></details>`
+      : "";
     box.insertAdjacentHTML("beforeend", `
       <div class="card">
         <span class="score">${Math.round((r.score || 0) * 100)}%</span>
-        <div class="meta">${esc(r.author)} ${r.time ? "· " + esc(r.time) : ""}</div>
+        <div class="meta">${esc(r.author)} ${r.time ? "· " + esc(r.time) : ""}${media ? " · " + esc(media) : ""}</div>
         <div>${esc(r.summary)}</div>
         <div class="extract">${ex}</div>
         <a href="${esc(r.url)}" target="_blank">Mở bài viết ↗</a>
-        <details><summary>Nội dung gốc</summary><pre>${esc(r.text)}</pre></details>
+        <details><summary>Nội dung gốc</summary><pre>${esc(r.text)}</pre></details>${commentList}
       </div>`);
   }
 }
@@ -138,12 +144,15 @@ runButton.onclick = async () => {
       const detail = d ? ` Nhận diện ${d.candidates} khung bài; ${d.missingLinks} thiếu link, ${d.missingText} thiếu nội dung; đã cuộn ${d.scrolls} lần.` : "";
       throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Gemini chưa được gọi. Nếu vừa cập nhật extension, hãy tải lại tab Facebook. Bấm “Tải chẩn đoán” và gửi báo cáo để kiểm tra cấu trúc trang.`);
     }
-    $("status").textContent = `Đã đọc ${scan.posts.length} bài. Đang nhờ Gemini lọc...`;
+    const d = scan.diagnostics || {};
+    $("status").textContent = `Đã đọc ${scan.posts.length} bài (${d.images || 0} ảnh, ${d.comments || 0} bình luận). Đang tải ảnh và nhờ Gemini lọc...`;
 
     const filt = await chrome.runtime.sendMessage({ type: "FILTER", query, posts: scan.posts });
     if (!filt?.ok) throw new Error(filt?.error || "Lọc thất bại");
     lastResults = filt.results;
-    $("status").textContent = `Xong: ${filt.results.length}/${scan.posts.length} bài phù hợp.`;
+    const stats = filt.stats || {};
+    const skipped = stats.imagesSkipped ? `, bỏ ${stats.imagesSkipped} ảnh không tải được` : "";
+    $("status").textContent = `Xong: ${filt.results.length}/${scan.posts.length} bài phù hợp (Gemini đã xem ${stats.imagesSent || 0} ảnh, ${stats.comments || 0} bình luận${skipped}).`;
     render(filt.results);
     $("tools").style.display = filt.results.length ? "flex" : "none";
   } catch (e) {
@@ -164,8 +173,11 @@ $("copy").onclick = () => {
 
 $("csv").onclick = () => {
   const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
-  const rows = [["score", "author", "time", "summary", "extracted", "url"]];
-  for (const r of lastResults) rows.push([r.score, r.author, r.time, r.summary, JSON.stringify(r.extracted), r.url]);
+  const rows = [["score", "author", "time", "summary", "extracted", "images", "comments", "url"]];
+  for (const r of lastResults) {
+    const comments = (r.comments || []).map((c) => (c.author ? c.author + ": " : "") + c.text).join("\n");
+    rows.push([r.score, r.author, r.time, r.summary, JSON.stringify(r.extracted), (r.images || []).length, comments, r.url]);
+  }
   const blob = new Blob(["\ufeff" + rows.map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

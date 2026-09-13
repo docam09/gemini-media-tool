@@ -34,9 +34,21 @@ test("opens legacy settings with the migrated model and saves without losing the
   const f = await fixture(t, { geminiModel: "gemini-2.5-flash", geminiApiKey: "test-api-key" });
   assert.equal(f.model.value, "gemini-3.6-flash");
   assert.equal(f.document.querySelector("#key").value, "test-api-key");
+  assert.equal(f.document.querySelector("#readImages").checked, true);
+  assert.equal(f.document.querySelector("#readComments").checked, true);
   await f.save();
-  assert.deepEqual(f.storage, { geminiModel: "gemini-3.6-flash", geminiApiKey: "test-api-key" });
+  assert.deepEqual(f.storage, { geminiModel: "gemini-3.6-flash", geminiApiKey: "test-api-key", readImages: true, readComments: true });
   assert.equal(f.document.querySelector("#msg").textContent, "Đã lưu.");
+});
+
+test("loads and saves disabled image and comment reading", async (t) => {
+  const f = await fixture(t, { readImages: false });
+  assert.equal(f.document.querySelector("#readImages").checked, false);
+  assert.equal(f.document.querySelector("#readComments").checked, true);
+  f.document.querySelector("#readComments").checked = false;
+  await f.save();
+  assert.equal(f.storage.readImages, false);
+  assert.equal(f.storage.readComments, false);
 });
 
 test("uses the same default for new settings and a cleared model field", async (t) => {

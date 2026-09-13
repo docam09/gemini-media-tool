@@ -9,6 +9,8 @@
     button { margin-top: 16px; background: #1877f2; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; }
     #msg { color: #2e7d32; margin-left: 8px; }
     small { color: #606770; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-weight: 600; }
+    .check input { width: auto; margin: 0; }
   </style>
 </head>
 <body>
@@ -23,6 +25,10 @@
   </datalist>
   <small>Mặc định: gemini-3.6-flash. Có thể nhập mã model khác hỗ trợ generateContent và JSON output.
     Cấu hình gemini-2.5-flash cũ tự chuyển sang gemini-3.6-flash.</small>
+  <label class="check"><input id="readImages" type="checkbox" checked /> Đọc ảnh trong bài</label>
+  <small>Gửi tối đa 4 ảnh mỗi bài (ảnh Facebook, không gồm avatar, icon) cho Gemini đọc chữ trên ảnh. Tốn thêm token và thời gian.</small>
+  <label class="check"><input id="readComments" type="checkbox" checked /> Đọc bình luận đang hiển thị</label>
+  <small>Gửi kèm tối đa 12 bình luận đang hiển thị của mỗi bài. Link kết quả vẫn là link bài gốc.</small>
   <button id="save">Lưu</button><span id="msg"></span>
   <script type="module" src="options.js"></script>
 </body>

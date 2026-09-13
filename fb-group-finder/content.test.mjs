@@ -78,7 +78,81 @@ test("extracts classic articles and excludes comments and repeated URL variants"
     author: "Người bán",
     time: "1 giờ",
     text: "Tiger 1,2 triệu",
+    images: [],
+    comments: [{ author: "người mua", text: "Nội dung bình luận" }],
   });
+});
+
+const photo = (name, attrs = "") => `<a href="/photo/?fbid=${name}" role="link"><img src="https://scontent.xx.fbcdn.net/v/t39/${name}.jpg" ${attrs} /></a>`;
+
+test("collects post photos but not avatars, icons, emoji, external or comment images", async (t) => {
+  const f = fixture(t, `<div role="article">
+    <h2><img src="https://scontent.xx.fbcdn.net/v/t1/avatar.jpg" width="40" height="40" /> Người bán</h2>
+    <a href="/groups/123/posts/10/" aria-label="1 giờ">1h</a>
+    <div data-ad-preview="message">Bảng giá trong ảnh <img src="https://static.xx.fbcdn.net/images/emoji.php/v9/t1/1/16/1f600.png" width="16" height="16" /></div>
+    ${photo("p1")}${photo("p1")}${photo("p2", 'width="720" height="960"')}${photo("p3")}${photo("p4")}${photo("p5")}
+    <img src="https://scontent.xx.fbcdn.net/v/t1/small.jpg" width="48" height="48" />
+    <img src="https://static.xx.fbcdn.net/rsrc.php/v3/like.png" />
+    <img src="https://example.com/catalog.jpg" />
+    <img src="data:image/png;base64,AAAA" />
+    <div role="button"><img src="https://scontent.xx.fbcdn.net/v/t1/button.jpg" /></div>
+    <div role="article" aria-label="Bình luận của Khách"><div dir="auto">Có ảnh thật không?</div>
+      <img src="https://scontent.xx.fbcdn.net/v/t1/comment-photo.jpg" width="400" height="300" /></div>
+  </div>`);
+  const { posts } = await f.scan();
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].images, ["p1", "p2", "p3", "p4"].map((name) => `https://scontent.xx.fbcdn.net/v/t39/${name}.jpg`));
+  assert.equal(posts[0].text, "Bảng giá trong ảnh");
+  assert.deepEqual(posts[0].comments, [{ author: "Khách", text: "Có ảnh thật không?" }]);
+});
+
+test("reads visible comments and replies of the right post without controls, inputs or comment links", async (t) => {
+  const comments = (id) => `
+    <div role="article" aria-label="Comment by Seller">
+      <h3><a href="/user/1/">Seller</a></h3>
+      <div dir="auto">Giá ${id} là 850k</div><a href="/groups/123/posts/${id}/?comment_id=5">1h</a>
+      <div role="button"><span dir="auto">Thích</span></div>
+      <ul><li><span dir="auto">Trả lời</span></li></ul>
+      <div role="article" aria-label="Phản hồi của Người mua"><div dir="auto">Để em ${id} ạ</div></div>
+    </div>
+    <div role="button"><span dir="auto">Xem thêm bình luận</span></div>
+    <form><div role="textbox" dir="auto" aria-label="Viết bình luận">Viết bình luận...</div></form>`;
+  const f = fixture(t, post("10", "Tiger 10", comments(10)) + post("20", "Tiger 20", comments(20)) + post("30", "Tiger 30"));
+  const { posts, diagnostics } = await f.scan();
+  assert.deepEqual(posts.map((p) => p.url), [10, 20, 30].map((id) => `https://www.facebook.com/groups/123/posts/${id}/`));
+  assert.deepEqual(posts[0].comments, [
+    { author: "Seller", text: "Giá 10 là 850k" },
+    { author: "Người mua", text: "Để em 10 ạ" },
+  ]);
+  assert.deepEqual(posts[1].comments.map((c) => c.text), ["Giá 20 là 850k", "Để em 20 ạ"]);
+  assert.deepEqual(posts[2].comments, []);
+  assert.equal(posts[0].text, "Tiger 10");
+  assert.equal(diagnostics.comments, 4);
+  assert.equal(diagnostics.images, 0);
+  assert.equal(f.progress.at(-1).comments, 4);
+});
+
+test("caps comments and images per post and refreshes a post once more comments render", async (t) => {
+  const many = Array.from({ length: 15 }, (_, i) => `<div role="article" aria-label="Bình luận của A${i}"><div dir="auto">C${i}</div></div>`).join("");
+  const f = fixture(t, post("10", "Tiger", photo("p1")), { height: 3000, onScroll: (n, window) => {
+    if (n === 1) window.document.querySelector('[role="article"]').insertAdjacentHTML("beforeend", many);
+  } });
+  const { posts } = await f.scan();
+  assert.equal(posts[0].comments.length, 12);
+  assert.equal(posts[0].comments[0].author, "A0");
+  assert.deepEqual(posts[0].images, ["https://scontent.xx.fbcdn.net/v/t39/p1.jpg"]);
+});
+
+test("reports image and comment counts in diagnostics without exposing their content", async (t) => {
+  const f = fixture(t, post("10", "Tiger", photo("secret-photo") +
+    '<div role="article" aria-label="Bình luận của Khách"><div dir="auto">SECRET COMMENT 0912345678</div></div>'));
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  assert.equal(report.samples[0].imageCount, 1);
+  assert.equal(report.samples[0].commentCount, 1);
+  assert.equal(report.selectedRoot.counts.postImages, 1);
+  assert.equal(report.selectedRoot.counts.commentArticles, 1);
+  const dump = JSON.stringify(report);
+  assert.ok(!dump.includes("secret-photo") && !dump.includes("SECRET COMMENT") && !dump.includes("0912345678") && !dump.includes("Khách"));
 });
 
 test("extracts FeedUnit and message-only cards without role=article", async (t) => {

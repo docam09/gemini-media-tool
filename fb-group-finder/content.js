@@ -7,7 +7,10 @@
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
   const LINK = 'a, [role="link"]';
   const LINK_WITH_HREF = 'a[href], [role="link"][href]';
-  const VERSION = "0.1.4";
+  const VERSION = "0.2.0";
+  const MAX_IMAGES = 4;
+  const MAX_COMMENTS = 12;
+  const COMMENT_LABEL = /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let scanning = false;
   let stopRequested = false;
@@ -43,9 +46,12 @@
     return null;
   }
 
+  function isCommentArticle(article) {
+    return COMMENT_LABEL.test(article?.getAttribute("aria-label") || "");
+  }
+
   function isComment(element) {
-    const article = element.closest(ARTICLE);
-    return /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i.test(article?.getAttribute("aria-label") || "");
+    return isCommentArticle(element.closest(ARTICLE));
   }
 
   function belongsToPost(element, post) {
@@ -129,6 +135,54 @@
     return parts.join("\n");
   }
 
+  function imageUrl(img) {
+    try {
+      const url = new URL(img.currentSrc || img.getAttribute("src") || "", location.origin);
+      if (url.protocol !== "https:" || !/(?:^|\.)fbcdn\.net$/.test(url.hostname) || url.hostname.startsWith("static.")) return null;
+      if (/emoji|\/rsrc\.php|\/images\//.test(url.pathname)) return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function findImages(post) {
+    const urls = [];
+    for (const img of post.querySelectorAll("img")) {
+      if (!belongsToPost(img, post) || img.closest('h2, h3, h4, button, [role="button"], svg')) continue;
+      const width = Number(img.getAttribute("width")) || img.width || img.naturalWidth;
+      const height = Number(img.getAttribute("height")) || img.height || img.naturalHeight;
+      if ((width && width < 100) || (height && height < 100)) continue;
+      const url = imageUrl(img);
+      if (url && !urls.includes(url)) urls.push(url);
+      if (urls.length >= MAX_IMAGES) break;
+    }
+    return urls;
+  }
+
+  function commentText(article) {
+    const parts = [];
+    for (const node of article.querySelectorAll(MESSAGE + ', [dir="auto"]')) {
+      if (node.closest(ARTICLE) !== article || node.closest('form, [role="button"], button, a, [role="link"], h2, h3, h4, ul, [aria-hidden="true"]')) continue;
+      const text = textOf(node);
+      if (text && !parts.some((part) => part.includes(text))) parts.push(text);
+    }
+    return parts.join("\n").slice(0, 600);
+  }
+
+  function findComments(post) {
+    const comments = [];
+    for (const article of post.querySelectorAll(ARTICLE)) {
+      if (!isCommentArticle(article) || article.closest('form, [role="dialog"]')) continue;
+      const text = commentText(article);
+      if (!text) continue;
+      const author = (article.getAttribute("aria-label") || "").replace(COMMENT_LABEL, "").replace(/^\s*(?:by|của|:)\s*/i, "").trim().slice(0, 80);
+      comments.push({ author, text });
+      if (comments.length >= MAX_COMMENTS) break;
+    }
+    return comments;
+  }
+
   async function expandSeeMore(candidates, expanded) {
     let clicked = false;
     for (const post of candidates) {
@@ -185,7 +239,10 @@
       if (!text) missingText++;
       if (!permalink || !text || posts.size >= limit) continue;
       const previous = posts.get(permalink.url);
-      if (previous && previous.text.length >= text.length) continue;
+      const images = findImages(post);
+      const comments = findComments(post);
+      if (previous && previous.text.length >= text.length && previous.images.length >= images.length &&
+          previous.comments.length >= comments.length) continue;
       const author = [...post.querySelectorAll('h2, h3, h4, strong a, a[role="link"] strong')]
         .find((node) => belongsToPost(node, post));
       posts.set(permalink.url, {
@@ -194,8 +251,12 @@
         author: textOf(author),
         time: permalink.label,
         text: text.slice(0, 4000),
+        images,
+        comments,
       });
     }
+    diagnostics.images = [...posts.values()].reduce((sum, item) => sum + item.images.length, 0);
+    diagnostics.comments = [...posts.values()].reduce((sum, item) => sum + item.comments.length, 0);
     diagnostics.candidates = Math.max(diagnostics.candidates, candidates.length);
     diagnostics.missingLinks = Math.max(diagnostics.missingLinks, missingLinks);
     diagnostics.missingText = Math.max(diagnostics.missingText, missingText);
@@ -283,6 +344,8 @@
       linksWithoutHref: root.querySelectorAll('[role="link"]:not([href]), a:not([href])').length,
       acceptedLinks: [...root.querySelectorAll(LINK_WITH_HREF)].filter((node) => postUrl(node.getAttribute("href"))).length,
       images: root.querySelectorAll("img").length,
+      postImages: [...root.querySelectorAll("img")].filter((img) => imageUrl(img)).length,
+      commentArticles: [...root.querySelectorAll(ARTICLE)].filter(isCommentArticle).length,
     };
   }
 
@@ -310,6 +373,8 @@
       samples: (candidates.length ? candidates.slice(0, 3) : [root]).map((post) => ({
         hasPermalink: Boolean(findPermalink(post)),
         extractedTextLength: findText(post).length,
+        imageCount: findImages(post).length,
+        commentCount: findComments(post).length,
         counts: selectorCounts(post),
         links: [...post.querySelectorAll(LINK)].slice(0, 24).map(describeNode),
         structure: structure(post),
@@ -323,7 +388,7 @@
     const posts = new Map();
     const expanded = new WeakSet();
     const activated = new WeakSet();
-    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
+    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, images: 0, comments: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
     lastScan = { maxPosts, maxScrolls, scanned: 0, ...diagnostics };
     const startPath = location.pathname + location.search;
     let previous = "";
