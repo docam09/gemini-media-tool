@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.2.0**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.2.1**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -66,6 +66,13 @@ Lỗi `models/gemini-2.5-flash is no longer available to new users` xuất hiệ
 - Cài đặt có hai ô **Đọc ảnh trong bài** và **Đọc bình luận đang hiển thị** (mặc định bật). Tắt đọc ảnh để tiết kiệm token và thời gian.
 - Chẩn đoán chỉ ghi số ảnh và số bình luận của mỗi khung, không ghi URL ảnh, tên hay nội dung bình luận.
 - Đã gọi thử Gemini thực với ảnh bảng giá mô phỏng: model đọc được giá và số điện thoại trên ảnh. Cách nhận diện ảnh/bình luận trong DOM Facebook thực tế chưa được xác nhận; nếu popup báo 0 ảnh/0 bình luận trong khi bài có, bấm **Tải chẩn đoán** và gửi báo cáo.
+
+### Bản 0.2.1: link bài dùng tên nhóm trong khi trang dùng số ID
+
+Báo cáo chẩn đoán từ bản 0.2.0: 11 khung bài, mỗi khung đều có link `groups/<tên nhóm>/posts/<số>` nhưng bị từ chối vì trang đang mở là `groups/<số ID>/`; bộ đọc coi đó là nhóm khác nên báo "thiếu link" cho toàn bộ bài và dừng sau 12 lượt cuộn. Ảnh và bình luận trong các khung đã được nhận diện (4 ảnh, 2 bình luận mỗi khung mẫu).
+
+- Một nhóm có thể được gọi bằng số ID hoặc tên rút gọn. Link bài được chấp nhận khi hai định danh trùng nhau, hoặc khi một bên là số và bên kia là tên. Hai số khác nhau hoặc hai tên khác nhau vẫn bị coi là nhóm khác.
+- Chẩn đoán `sameGroup` dùng cùng quy tắc.
 
 ## Kiểm tra mã nguồn
 

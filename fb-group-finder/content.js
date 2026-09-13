@@ -7,7 +7,7 @@
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
   const LINK = 'a, [role="link"]';
   const LINK_WITH_HREF = 'a[href], [role="link"][href]';
-  const VERSION = "0.2.0";
+  const VERSION = "0.2.1";
   const MAX_IMAGES = 4;
   const MAX_COMMENTS = 12;
   const COMMENT_LABEL = /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i;
@@ -16,20 +16,30 @@
   let stopRequested = false;
   let lastScan = null;
 
+  function currentGroup() {
+    return location.pathname.match(/^\/groups\/([^/]+)/)?.[1];
+  }
+
+  // A group is reachable by numeric id and by vanity name; the page may use one while permalinks use the other.
+  function sameGroup(linkedGroup) {
+    const group = currentGroup();
+    if (!group || linkedGroup === group) return true;
+    return /^\d+$/.test(group) !== /^\d+$/.test(linkedGroup);
+  }
+
   function postUrl(href) {
     try {
       const url = new URL(href, location.origin);
       if (url.protocol !== "https:" || !["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname)) return null;
       if (url.searchParams.has("comment_id") || url.searchParams.has("reply_comment_id")) return null;
-      const group = location.pathname.match(/^\/groups\/([^/]+)/)?.[1];
       const path = url.pathname.match(/^\/groups\/([^/]+)\/(?:posts|permalink)\/([a-zA-Z0-9]+)\/?$/);
       if (path) {
-        if (group && path[1] !== group) return null;
+        if (!sameGroup(path[1])) return null;
         return `https://www.facebook.com/groups/${path[1]}/posts/${path[2]}/`;
       }
       const linkedGroup = url.pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1];
       const postId = url.searchParams.get("multi_permalinks");
-      if (linkedGroup && (!group || linkedGroup === group) && /^[a-zA-Z0-9]+$/.test(postId || "")) {
+      if (linkedGroup && sameGroup(linkedGroup) && /^[a-zA-Z0-9]+$/.test(postId || "")) {
         return `https://www.facebook.com/groups/${linkedGroup}/posts/${postId}/`;
       }
       const storyId = url.searchParams.get("story_fbid");
@@ -293,7 +303,7 @@
         pathShape: url.pathname.split("/").filter(Boolean).map((part) => publicSegments.includes(part) ? part : /^\d+$/.test(part) ? ":number" : part.startsWith("pfbid") ? ":pfbid" : ":value"),
         isFragmentLink: href.startsWith("#"),
         accepted: Boolean(postUrl(href)),
-        sameGroup: group ? group === location.pathname.match(/^\/groups\/([^/]+)/)?.[1] : null,
+        sameGroup: group ? sameGroup(group) : null,
         queryKeys: ["story_fbid", "id", "multi_permalinks", "comment_id", "reply_comment_id"].filter((key) => url.searchParams.has(key)),
         hasFragment: Boolean(url.hash),
       };

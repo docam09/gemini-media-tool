@@ -11,9 +11,9 @@ const post = (id, text = "Nồi cơm Tiger 1,2 triệu", extra = "") => `
     <div data-ad-preview="message">${text}</div>${extra}
   </div>`;
 
-function fixture(t, html, { height = 800, onScroll = () => {}, onWait = () => {} } = {}) {
+function fixture(t, html, { height = 800, onScroll = () => {}, onWait = () => {}, url = "https://www.facebook.com/groups/123/" } = {}) {
   const dom = new JSDOM(`<main><section role="feed">${html}</section></main>`, {
-    url: "https://www.facebook.com/groups/123/",
+    url,
     runScripts: "outside-only",
   });
   t.after(() => dom.window.close());
@@ -217,6 +217,21 @@ test("normalizes story.php regardless of query order and retains share links", a
     "https://www.facebook.com/permalink.php?story_fbid=pfbidXYZ&id=123",
     "https://www.facebook.com/share/p/ABC/",
   ]);
+});
+
+test("accepts permalinks that use the group's vanity name while the page uses its numeric id, and vice versa", async (t) => {
+  const vanity = post("10").replace("/groups/123/", "/groups/hanoi.market/") +
+    post("20", "Toshiba 700k").replace("/groups/123/", "/groups/456/") +
+    post("30", "Cuckoo 500k").replace('href="/groups/123/posts/30/?__cft__=tracking"', 'href="/groups/hanoi.market/?multi_permalinks=30"');
+  const numericPage = fixture(t, vanity, { url: "https://www.facebook.com/groups/123/" });
+  assert.deepEqual((await numericPage.scan()).posts.map((p) => p.url), [
+    "https://www.facebook.com/groups/hanoi.market/posts/10/",
+    "https://www.facebook.com/groups/hanoi.market/posts/30/",
+  ]);
+  const vanityPage = fixture(t, post("10") + post("20", "Toshiba 700k").replace("/groups/123/", "/groups/other.group/"), { url: "https://www.facebook.com/groups/hanoi.market/" });
+  assert.deepEqual((await vanityPage.scan()).posts.map((p) => p.url), ["https://www.facebook.com/groups/123/posts/10/"]);
+  const { report } = await vanityPage.send({ type: "DIAGNOSE" });
+  assert.deepEqual(report.linkPatterns.filter((p) => p.route === "group-post").map((p) => [p.sameGroup, p.accepted]), [[true, true], [false, false]]);
 });
 
 test("rejects external lookalike links, comments, and other group links", async (t) => {
