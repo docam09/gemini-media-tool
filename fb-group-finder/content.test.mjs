@@ -234,6 +234,27 @@ test("accepts permalinks that use the group's vanity name while the page uses it
   assert.deepEqual(report.linkPatterns.filter((p) => p.route === "group-post").map((p) => [p.sameGroup, p.accepted]), [[true, true], [false, false]]);
 });
 
+test("accepts a post from another group only when the card itself names that group, keeping the post's own link first", async (t) => {
+  const foreign = `<div><a role="link" aria-label="Chợ Yên Phong" href="/groups/456/"><img src="https://scontent.fbcdn.net/avatar.jpg"></a>
+      <a role="link" href="/groups/456/">Chợ Yên Phong</a> · <a role="link" href="/groups/456/user/777/">Người bán</a>
+      <a role="link" aria-label="2 giờ" href="/groups/456/?multi_permalinks=20&__cft__=t">2h</a>
+      <div data-ad-preview="message">Toshiba 700k còn mới, giao tận nơi Yên Phong</div>
+    </div>`;
+  const shared = post("10", "Chia sẻ lại từ nhóm khác", `<div role="article">
+      <a role="link" href="/groups/789/">Nhóm nguồn</a><a role="link" href="/groups/789/posts/90/">gốc</a><div dir="auto">Bài gốc</div></div>`);
+  const undeclared = `<div role="article"><h2>Ẩn danh</h2><a href="/groups/999/posts/40/">1h</a><div data-ad-preview="message">Sharp 300k</div></div>`;
+  const f = fixture(t, foreign + shared + undeclared, { url: "https://www.facebook.com/groups/123/" });
+  const result = await f.scan();
+  assert.deepEqual(result.posts.map((p) => [p.url, p.text]).sort(), [
+    ["https://www.facebook.com/groups/123/posts/10/", "Chia sẻ lại từ nhóm khác"],
+    ["https://www.facebook.com/groups/456/posts/20/", "Toshiba 700k còn mới, giao tận nơi Yên Phong"],
+  ]);
+  assert.equal(result.diagnostics.foreignGroupPosts, 1);
+  assert.equal(result.diagnostics.missingLinks, 1);
+  const { report } = await f.send({ type: "DIAGNOSE" });
+  assert.deepEqual(report.pagePath, ["groups", ":number"]);
+});
+
 test("rejects external lookalike links, comments, and other group links", async (t) => {
   const f = fixture(t, `<article>
     <a href="https://example.com/groups/123/posts/10/">External</a>

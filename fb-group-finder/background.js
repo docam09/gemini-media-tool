@@ -211,7 +211,8 @@ async function runJob({ tabId, query, maxPosts, maxScrolls, groupTitle }) {
       throw new Error(`Chưa đọc được bài có nội dung và link.${detail} Gemini chưa được gọi. Nếu vừa cập nhật extension, hãy tải lại tab Facebook. Bấm “Tải chẩn đoán” và gửi báo cáo để kiểm tra cấu trúc trang.`);
     }
     const d = scan.diagnostics || {};
-    await patchJob({ state: "filtering", scanned: scan.posts.length, status: `Đã đọc ${scan.posts.length} bài (${d.images || 0} ảnh, ${d.comments || 0} bình luận). Đang tải ảnh và nhờ Gemini lọc...` });
+    const foreign = d.foreignGroupPosts ? `, ${d.foreignGroupPosts} bài thuộc nhóm khác` : "";
+    await patchJob({ state: "filtering", scanned: scan.posts.length, status: `Đã đọc ${scan.posts.length} bài (${d.images || 0} ảnh, ${d.comments || 0} bình luận${foreign}). Đang tải ảnh và nhờ Gemini lọc...` });
     const { results, stats } = await filterPosts(query, scan.posts);
     const skipped = stats.imagesSkipped ? `, bỏ ${stats.imagesSkipped} ảnh không tải được` : "";
     await patchJob({

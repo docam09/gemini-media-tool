@@ -24,7 +24,7 @@ Mẹo: dùng bộ lọc của Facebook (Bài viết mới nhất / tìm kiếm t
 1. Giải nén bản mới hoặc cập nhật mã nguồn.
 2. Nếu dùng lại thư mục cũ: thay các tệp bằng bản mới, vào `chrome://extensions`, bấm **Tải lại / Reload** ở FB Group Finder.
 3. Nếu chọn một thư mục mới: gỡ bản cũ rồi **Load unpacked** thư mục mới.
-4. Kiểm tra phiên bản **0.2.2**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
+4. Kiểm tra phiên bản **0.2.3**. **Tải lại cả tab Facebook** để thay content script đang chạy, rồi quét lại.
 
 Bản 0.1.1 đọc thêm FeedUnit, khối nội dung và thẻ bài không có `role="article"`; hỗ trợ link `pfbid`, `multi_permalinks`, `story.php`. Extension cuộn từng phần màn hình, chờ "Xem thêm" và thử lại khi feed đứng yên; không dừng chỉ vì chưa tìm được bài sau vài lượt.
 
@@ -82,6 +82,13 @@ Popup của Chrome bị đóng ngay khi bấm ra ngoài hoặc chuyển tab; tr�
 - Nút **Xóa kết quả** xóa `job` đã lưu. Kết quả chỉ nằm trên máy người dùng và chỉ giữ một lượt quét gần nhất.
 - Chỉ chạy một lượt quét tại một thời điểm; **Dừng** gửi yêu cầu dừng tới tab đang quét. Lượt quét không cập nhật trong 2 phút (trình duyệt khởi động lại, tab đóng) được coi là gián đoạn và cho phép quét lại.
 - Service worker được giữ sống bằng cách ghi mốc thời gian mỗi 20 giây trong lúc quét; content script vẫn gửi tiến trình mỗi lượt cuộn.
+
+### Bản 0.2.3: bài thuộc nhóm khác trên trang đang mở
+
+Báo cáo chẩn đoán 0.2.2 cho thấy một trang `/groups/<số>/` hiển thị các bài mà mọi link (ảnh nhóm, tên nhóm, tác giả, permalink) đều trỏ tới một số ID nhóm khác, kèm các khung gợi ý "Nhóm"/"Người"; bộ đọc từ chối toàn bộ và báo 0 bài.
+
+- Link bài được chấp nhận nếu cùng nhóm với trang (ưu tiên), hoặc nếu chính khung bài đó tự nêu tên nhóm của mình bằng link `/groups/<nhóm>/` hay `/groups/<nhóm>/user/…` trỏ tới đúng nhóm trong permalink. Link tới nhóm khác mà khung bài không nêu tên vẫn bị từ chối; bài chia sẻ vẫn lấy link của bài ngoài trước.
+- Chẩn đoán ghi `foreignGroupPosts` và `pagePath` (dạng đường dẫn trang, không có ID) để nhận biết trang đang mở là gì.
 
 ## Kiểm tra mã nguồn
 

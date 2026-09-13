@@ -7,7 +7,7 @@
   const MESSAGE = '[data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"]';
   const LINK = 'a, [role="link"]';
   const LINK_WITH_HREF = 'a[href], [role="link"][href]';
-  const VERSION = "0.2.2";
+  const VERSION = "0.2.3";
   const MAX_IMAGES = 4;
   const MAX_COMMENTS = 12;
   const COMMENT_LABEL = /^(?:comment|reply|bình luận|phản hồi|댓글|답글)(?:\s|:|$)/i;
@@ -21,25 +21,27 @@
   }
 
   // A group is reachable by numeric id and by vanity name; the page may use one while permalinks use the other.
-  function sameGroup(linkedGroup) {
+  function sameGroup(linkedGroup, declared) {
     const group = currentGroup();
-    if (!group || linkedGroup === group) return true;
+    if (!group || linkedGroup === group || declared?.has(linkedGroup)) return true;
     return /^\d+$/.test(group) !== /^\d+$/.test(linkedGroup);
   }
 
-  function postUrl(href) {
+  // `declared` widens the group check to groups the post card itself names (its group avatar/name/author
+  // links); pages such as the mixed groups feed or search results show posts from groups other than the URL's.
+  function postUrl(href, declared) {
     try {
       const url = new URL(href, location.origin);
       if (url.protocol !== "https:" || !["www.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname)) return null;
       if (url.searchParams.has("comment_id") || url.searchParams.has("reply_comment_id")) return null;
       const path = url.pathname.match(/^\/groups\/([^/]+)\/(?:posts|permalink)\/([a-zA-Z0-9]+)\/?$/);
       if (path) {
-        if (!sameGroup(path[1])) return null;
+        if (!sameGroup(path[1], declared)) return null;
         return `https://www.facebook.com/groups/${path[1]}/posts/${path[2]}/`;
       }
       const linkedGroup = url.pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1];
       const postId = url.searchParams.get("multi_permalinks");
-      if (linkedGroup && sameGroup(linkedGroup) && /^[a-zA-Z0-9]+$/.test(postId || "")) {
+      if (linkedGroup && sameGroup(linkedGroup, declared) && /^[a-zA-Z0-9]+$/.test(postId || "")) {
         return `https://www.facebook.com/groups/${linkedGroup}/posts/${postId}/`;
       }
       const storyId = url.searchParams.get("story_fbid");
@@ -73,13 +75,30 @@
     return !article || article === primary || !post.contains(article);
   }
 
-  function findPermalink(post) {
-    for (const anchor of post.querySelectorAll(LINK_WITH_HREF)) {
-      if (!belongsToPost(anchor, post)) continue;
-      const url = postUrl(anchor.getAttribute("href"));
-      if (url) return { url, label: anchor.getAttribute("aria-label") || "" };
+  function declaredGroups(anchors) {
+    const groups = new Set();
+    for (const anchor of anchors) {
+      try {
+        const url = new URL(anchor.getAttribute("href"), location.origin);
+        const group = url.pathname.match(/^\/groups\/([^/]+)\/?(?:user\/\d+\/?)?$/)?.[1];
+        if (group && !url.searchParams.has("multi_permalinks")) groups.add(group);
+      } catch {
+        continue;
+      }
     }
-    return null;
+    return groups;
+  }
+
+  function findPermalink(post) {
+    const anchors = [...post.querySelectorAll(LINK_WITH_HREF)].filter((anchor) => belongsToPost(anchor, post));
+    const pick = (declared) => {
+      for (const anchor of anchors) {
+        const url = postUrl(anchor.getAttribute("href"), declared);
+        if (url) return { url, label: anchor.getAttribute("aria-label") || "", foreign: Boolean(declared) };
+      }
+      return null;
+    };
+    return pick() || pick(declaredGroups(anchors));
   }
 
   function feedRoot() {
@@ -242,10 +261,12 @@
   function collectPosts(candidates, posts, limit, diagnostics) {
     let missingLinks = 0;
     let missingText = 0;
+    let foreign = 0;
     for (const post of candidates) {
       const permalink = findPermalink(post);
       const text = findText(post);
       if (!permalink) missingLinks++;
+      else if (permalink.foreign) foreign++;
       if (!text) missingText++;
       if (!permalink || !text || posts.size >= limit) continue;
       const previous = posts.get(permalink.url);
@@ -270,6 +291,7 @@
     diagnostics.candidates = Math.max(diagnostics.candidates, candidates.length);
     diagnostics.missingLinks = Math.max(diagnostics.missingLinks, missingLinks);
     diagnostics.missingText = Math.max(diagnostics.missingText, missingText);
+    diagnostics.foreignGroupPosts = Math.max(diagnostics.foreignGroupPosts, foreign);
   }
 
   function scrollContainer() {
@@ -372,6 +394,7 @@
       schemaVersion: 2,
       extensionVersion: VERSION,
       pageType: linkShape(location.href).route,
+      pagePath: linkShape(location.href).pathShape,
       scanning,
       lastScan,
       documentCounts: selectorCounts(document),
@@ -398,7 +421,7 @@
     const posts = new Map();
     const expanded = new WeakSet();
     const activated = new WeakSet();
-    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, images: 0, comments: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
+    const diagnostics = { candidates: 0, missingLinks: 0, missingText: 0, foreignGroupPosts: 0, images: 0, comments: 0, linkActivations: 0, scrolls: 0, stopReason: "running" };
     lastScan = { maxPosts, maxScrolls, scanned: 0, ...diagnostics };
     const startPath = location.pathname + location.search;
     let previous = "";
