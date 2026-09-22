@@ -105,6 +105,13 @@ export interface StreamHandlers {
   onDone: (done: StreamDone) => void
 }
 
+export class IncompleteTranslationError extends Error {
+  constructor() {
+    super('Kết nối dịch bị ngắt trước khi có kết quả. Đang thử lại…')
+    this.name = 'IncompleteTranslationError'
+  }
+}
+
 /**
  * Stream a translation over Server-Sent Events.
  *
@@ -130,6 +137,14 @@ export async function translateStream(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let completed = false
+  const guardedHandlers: StreamHandlers = {
+    onDelta: handlers.onDelta,
+    onDone: (done) => {
+      completed = true
+      handlers.onDone(done)
+    },
+  }
 
   try {
     for (;;) {
@@ -142,13 +157,18 @@ export async function translateStream(
       while (split !== -1) {
         const frame = buffer.slice(0, split)
         buffer = buffer.slice(split + 2)
-        dispatch(frame, handlers)
+        dispatch(frame, guardedHandlers)
         split = buffer.indexOf('\n\n')
       }
     }
+  } catch (err: unknown) {
+    if (signal?.aborted) throw err
+    if (!completed) throw new IncompleteTranslationError()
+    throw err
   } finally {
     reader.releaseLock()
   }
+  if (!completed) throw new IncompleteTranslationError()
 }
 
 function dispatch(frame: string, handlers: StreamHandlers): void {

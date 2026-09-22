@@ -78,7 +78,7 @@ export interface SonioxSession {
  * tokens for the tail of a sentence land after the endpoint event, so flushing
  * immediately would cut them off; each late token restarts the timer.
  */
-const FLUSH_DELAY_MS = 500
+const FLUSH_DELAY_MS = 1200
 
 function isLanguageCode(value: string | undefined): value is LanguageCode {
   return value === 'vi' || value === 'ko'
@@ -165,13 +165,16 @@ export class TurnAssembler {
    * in what turned out to be silence — those must not reach the history.
    */
   flush(): LiveTurn | null {
-    const sourceText = joinTokens(this.finalOriginal)
-    const targetText = joinTokens(this.finalTranslation)
-    const sourceLang = detectLanguage(this.finalOriginal, this.finalTranslation)
+    const current = this.draft()
     this.reset()
 
-    if (!sourceText || !targetText || !sourceLang) return null
-    return { sourceLang, targetLang: other(sourceLang), sourceText, targetText }
+    if (!current.sourceText || !current.targetText || !current.sourceLang) return null
+    return {
+      sourceLang: current.sourceLang,
+      targetLang: other(current.sourceLang),
+      sourceText: current.sourceText,
+      targetText: current.targetText,
+    }
   }
 }
 
@@ -263,11 +266,14 @@ export function startLiveInterpreter(
       emitDraft()
     })
     recording.on('result', (result) => {
-      const addedFinalTranslation = assembler.push(result.tokens)
+      const includedTranslation = result.tokens.some(
+        (token) => token.translation_status === 'translation' && token.text.trim(),
+      )
+      assembler.push(result.tokens)
       emitDraft()
       // Trailing translation tokens keep arriving after the endpoint fires;
       // push the flush out so the turn isn't truncated mid-word.
-      if (addedFinalTranslation && flushTimer) scheduleFlush()
+      if (includedTranslation && flushTimer) scheduleFlush()
     })
   })()
 

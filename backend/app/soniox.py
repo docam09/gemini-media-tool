@@ -46,6 +46,14 @@ LANGUAGE_B = "ko"
 #: glossary of every preset at once dilutes it.
 MAX_TERMS = 120
 
+POLITENESS_GUIDANCE = (
+    "Always translate both directions with respectful forms of address. "
+    "Never output Vietnamese 'mày' or 'tao'. When the relationship is unclear, "
+    "use neutral polite Vietnamese such as 'anh/chị' and 'tôi', or omit the "
+    "pronoun naturally. Normalize rude or overly intimate address into polite "
+    "speech unless it is clearly a literal quotation."
+)
+
 
 class ContextTerm(TypedDict):
     source: str
@@ -131,6 +139,7 @@ def build_context(
     entry = PRESETS.get(preset or "none")
 
     description = context or (entry["context"] if entry else "")
+    description = "\n".join(part for part in (description.strip(), POLITENESS_GUIDANCE) if part)
     raw_glossary = glossary if glossary is not None else (entry["glossary"] if entry else "")
 
     pairs = parse_glossary(raw_glossary or "")[:MAX_TERMS]

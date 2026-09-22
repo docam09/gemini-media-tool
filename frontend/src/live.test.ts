@@ -68,6 +68,18 @@ describe('TurnAssembler', () => {
     expect(assembler.push([translated('안녕하세요', 'vi')])).toBe(true)
   })
 
+  it('uses the latest draft when an endpoint arrives before final translation', () => {
+    const assembler = new TurnAssembler()
+    assembler.push([original('Xin chào', 'vi'), translated('안녕하세요', 'vi', false)])
+
+    expect(assembler.flush()).toEqual({
+      sourceLang: 'vi',
+      targetLang: 'ko',
+      sourceText: 'Xin chào',
+      targetText: '안녕하세요',
+    })
+  })
+
   it('swallows the empty turns Soniox reports for pauses in silence', () => {
     const assembler = new TurnAssembler()
     expect(assembler.flush()).toBeNull()
