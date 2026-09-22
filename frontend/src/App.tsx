@@ -132,7 +132,6 @@ export default function App() {
   const [conversing, setConversing] = useState(false)
   const [interim, setInterim] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory)
-  const [autoSpeak, setAutoSpeak] = useState(true)
   const [autoSwap, setAutoSwap] = useState(() => loadString(LS_KEYS.autoSwap) !== '0')
   const [speechRate, setSpeechRate] = useState(() => {
     const stored = Number.parseFloat(loadString(LS_KEYS.speechRate))
@@ -188,7 +187,6 @@ export default function App() {
     context,
     glossary,
     selectedModel,
-    autoSpeak,
     autoSwap,
     speechRate,
     languages,
@@ -201,7 +199,6 @@ export default function App() {
     context,
     glossary,
     selectedModel,
-    autoSpeak,
     autoSwap,
     speechRate,
     languages,
@@ -380,16 +377,6 @@ export default function App() {
         ].slice(0, MAX_HISTORY),
       )
 
-      if (settings.autoSpeak && settings.languages) {
-        // Hold the microphone shut while our own audio plays, otherwise
-        // conversation mode transcribes the translation back as new input.
-        conversationRef.current?.pause()
-        await speak(finalText, settings.languages[settings.target].bcp47, {
-          rate: settings.speechRate,
-        })
-        conversationRef.current?.resume()
-      }
-
       if (conversationRef.current && settingsRef.current.autoSwap) {
         flipDirection()
       }
@@ -507,15 +494,6 @@ export default function App() {
               ...prev,
             ].slice(0, MAX_HISTORY),
           )
-
-          const settings = settingsRef.current
-          if (!settings.autoSpeak || !settings.languages) return
-          // Soniox hears our own speaker otherwise, and would dutifully
-          // translate the translation.
-          liveRef.current?.pause()
-          void speak(turn.targetText, settings.languages[turn.targetLang].bcp47, {
-            rate: settings.speechRate,
-          }).finally(() => liveRef.current?.resume())
         },
       },
     )
@@ -744,15 +722,6 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-              </label>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={autoSpeak}
-                  onChange={(event) => setAutoSpeak(event.target.checked)}
-                  disabled={!synthesisSupported}
-                />
-                <span>Tự đọc</span>
               </label>
             </div>
 
