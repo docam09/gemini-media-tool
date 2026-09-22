@@ -6,6 +6,8 @@ import {
   fetchModels,
   fetchPresets,
   fetchSonioxSession,
+  IncompleteTranslationError,
+  translate,
   translateStream,
   verify,
 } from './api'
@@ -309,18 +311,19 @@ export default function App() {
       setVerifyResult(null)
 
       let finalText = ''
+      const params = {
+        text: trimmed,
+        source: settings.source,
+        target: settings.target,
+        style: settings.style,
+        context: settings.context || undefined,
+        glossary: settings.glossary || undefined,
+        model: settings.selectedModel || undefined,
+        history: contextTurns(settings.source, settings.target),
+      }
       try {
         await translateStream(
-          {
-            text: trimmed,
-            source: settings.source,
-            target: settings.target,
-            style: settings.style,
-            context: settings.context || undefined,
-            glossary: settings.glossary || undefined,
-            model: settings.selectedModel || undefined,
-            history: contextTurns(settings.source, settings.target),
-          },
+          params,
           {
             onDelta: (delta) => setOutput((prev) => prev + delta),
             onDone: (done) => {
@@ -335,9 +338,23 @@ export default function App() {
         )
       } catch (err: unknown) {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : String(err))
-        setBusy(false)
-        return
+        if (err instanceof IncompleteTranslationError) {
+          try {
+            const recovered = await translate(params, controller.signal)
+            finalText = recovered.translation
+            setOutput(recovered.translation)
+            setStats({ latencyMs: recovered.latency_ms, cached: recovered.cached })
+          } catch (fallbackError: unknown) {
+            if (controller.signal.aborted) return
+            setError(
+              fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            )
+            return
+          }
+        } else {
+          setError(err instanceof Error ? err.message : String(err))
+          return
+        }
       } finally {
         if (abortRef.current === controller) abortRef.current = null
         setBusy(false)

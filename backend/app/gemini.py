@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 _NO_ZERO_THINKING: set[str] = set()
 
 MAX_OUTPUT_TOKENS = 1024
+MAX_STREAM_ATTEMPTS = 2
+RETRY_DELAY_SECONDS = 0.25
 
 
 class TranslationError(RuntimeError):
@@ -65,7 +67,12 @@ _TRANSLATE_SYSTEM = (
     "speaker's intent, register and politeness level. Resolve pronouns and "
     "elided subjects using the recent conversation when it is provided. If the "
     "input is a single word or a fragment, translate just that fragment. If it "
-    "is ambiguous, choose the reading that fits the stated context."
+    "is ambiguous, choose the reading that fits the stated context. Always use "
+    "respectful forms of address. Never output the Vietnamese pronouns 'mày' or "
+    "'tao'; when the relationship is unclear, use neutral polite forms such as "
+    "'anh/chị', 'tôi', or omit the pronoun naturally. Normalize rude or overly "
+    "intimate address into respectful speech unless the user explicitly asks "
+    "for a literal quotation."
 )
 
 _STYLE_GUIDANCE = {
@@ -155,8 +162,35 @@ class GeminiTranslator:
             glossary=glossary,
             history=history,
         )
-        async for delta in self._stream(prompt, _TRANSLATE_SYSTEM):
-            yield delta
+        last_error: TranslationError | None = None
+        for attempt in range(MAX_STREAM_ATTEMPTS):
+            usable_output = False
+            try:
+                async for delta in self._stream(prompt, _TRANSLATE_SYSTEM):
+                    if delta.strip():
+                        usable_output = True
+                    yield delta
+            except TranslationError as exc:
+                last_error = exc
+                if (
+                    usable_output
+                    or attempt + 1 >= MAX_STREAM_ATTEMPTS
+                    or not _is_retryable(exc)
+                ):
+                    raise
+                logger.warning(
+                    "Transient Gemini failure before output; retrying: %s", exc
+                )
+            else:
+                if usable_output:
+                    return
+                last_error = TranslationError("Gemini returned an empty translation")
+                if attempt + 1 >= MAX_STREAM_ATTEMPTS:
+                    break
+                logger.warning("Gemini returned no text; retrying once")
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+
+        raise last_error or TranslationError("Gemini returned an empty translation")
 
     async def translate(
         self,
@@ -304,6 +338,25 @@ def _is_thinking_rejection(exc: Exception) -> bool:
 
 
 _RETRY_DELAY_RE = re.compile(r"'retryDelay':\s*'(\d+)s'")
+_TRANSIENT_ERROR_MARKERS = (
+    "500",
+    "502",
+    "503",
+    "504",
+    "deadline_exceeded",
+    "internal",
+    "service unavailable",
+    "temporarily unavailable",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection closed",
+)
+
+
+def _is_retryable(exc: TranslationError) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_ERROR_MARKERS)
 
 
 def _describe(exc: Exception) -> str:
